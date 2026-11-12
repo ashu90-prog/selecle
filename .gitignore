@@ -1,0 +1,21 @@
+node_modules/
+*.log
+.env
+.npmrc
+
+# private notes and agent instructions: kept on this machine only
+Memory/
+CLAUDE.md
+.claude/
+
+# local test projects (each becomes its own git repo when selecle opens it)
+playground/
+selecle-practice/
+test_summoning.txt
+.selecle/
+
+# big local files (the Antigravity installer is over GitHub's 100 MB limit); keep only the logo
+Resources/*
+!Resources/Image/
+Resources/Image/*
+!Resources/Image/Logoorbanner.png

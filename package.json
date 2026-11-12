@@ -1,0 +1,42 @@
+{
+  "name": "selecle-cli",
+  "version": "0.2.0",
+  "description": "A haunted multiplayer terminal workspace: AI spirits (Kiro CLI) edit your project on git branches while friends join over Telnet.",
+  "license": "MIT",
+  "files": [
+    "bin",
+    "src",
+    "assets/banner.json",
+    "README.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "cli",
+    "terminal",
+    "telnet",
+    "ai-agents",
+    "claude-code",
+    "kiro",
+    "antigravity",
+    "git",
+    "multiplayer"
+  ],
+  "type": "module",
+  "bin": {
+    "selecle": "bin/selecle.js"
+  },
+  "scripts": {
+    "start": "node bin/selecle.js",
+    "test": "node --test",
+    "playground": "node scripts/make-playground.js",
+    "ana": "node bin/selecle.js playground --name ana",
+    "bob": "node bin/selecle.js playground --name bob",
+    "ana:real": "node bin/selecle.js playground --name ana --real",
+    "bob:real": "node bin/selecle.js playground --name bob --real",
+    "host": "node bin/selecle.js host playground",
+    "join": "node bin/selecle.js join"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
