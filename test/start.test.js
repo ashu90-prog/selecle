@@ -73,7 +73,7 @@ test('the tour opens by itself the first time, at the first thing you have not d
   const shown = text(state);
   assert.match(shown, /Welcome to selecle · quick start/);
   assert.match(shown, /1\. Say what you want/);
-  assert.match(shown, /0 of 9 done/);
+  assert.match(shown, /0 of 10 done/);
   const later = mk({ auto: true, guide: { done: ['talk', 'slash'], seen: false, off: false } });
   later.splash = true;
   press(later, 'x');
@@ -152,7 +152,7 @@ test('enter on a "type this" step fills the chat box for you to edit, and sends 
 test('enter on a "run this" step runs it', () => {
   const state = mk();
   typed(state, '/guide\r');
-  press(state, K.down, K.down, K.down, K.down, K.enter);
+  press(state, K.down, K.down, K.down, K.down, K.down, K.enter);
   assert.equal(state.tour, null);
   assert.ok(state.feed, '/feed opened for you');
   assert.ok(state.did.has('feed'));
@@ -241,7 +241,7 @@ test('progress survives a restart: a new session starts with the same ticks', ()
   const again = mk({ guide: first.me.guide });
   assert.ok(again.did.has('talk'));
   typed(again, '/guide\r');
-  assert.match(text(again), /\d of 9 done/);
+  assert.match(text(again), /\d of 10 done/);
   assert.ok(doneCount(again) >= 1);
 });
 
@@ -264,7 +264,7 @@ test('the tour draws at every size without breaking the frame, and shows what is
   typed(state, '/guide\r');
   const shown = text(state);
   assert.match(shown, /✔ 1\. Say what you want/);
-  assert.match(shown, /3 of 9 done/);
+  assert.match(shown, /3 of 10 done/);
   for (let sel = 0; sel < STEPS.length; sel++) {
     state.tour.sel = sel;
     for (const [w, h] of SIZES) render(state, w, h).lines.forEach((l, i, all) => { assert.equal(vlen(l), w, `step ${sel} ${w}x${h}`); assert.equal(all.length, h); });

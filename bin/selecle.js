@@ -2,6 +2,15 @@
 import path from 'node:path';
 import { HUMAN_RGB } from '../src/theme.js';
 
+// `selecle mcp`: the séance MCP server for Kiro agents. It speaks only JSON-RPC on stdout, so it
+// starts before anything else could print.
+if (process.argv[2] === 'mcp') {
+  const { runSeance } = await import('../src/seance.js');
+  const { version } = JSON.parse((await import('node:fs')).readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+  await runSeance({ version });
+  process.exit(0);
+}
+
 const USAGE = `selecle: a haunted terminal workspace where you and your friends build with AI spirits.
 
   Just type  selecle  to start. It checks you can use it, then opens the app with a short
@@ -16,6 +25,8 @@ usage:
   selecle login | logout | whoami                        sign in to Kiro CLI, the agent selecle runs on / see your profile
   selecle onboard                                        the welcome page again: your ID card and which agent CLI to use
   selecle tools                                          check and install the tools selecle works with (cloudflared, git, your editor...)
+  selecle kiro [folder]                                  install the spirits as Kiro agents; show this project's Kiro steering and specs
+  selecle mcp                                            the séance: selecle's MCP server for Kiro (spirits get it by themselves)
   selecle pair [folder]                                  print a pairing code for this project (once, for a new device)
   selecle pair <code> [folder] [--no-soul] [--force]     use a pairing code on this device
   selecle autosync on|off|status [folder]                the Crypt's memory follows you between devices by itself
@@ -30,7 +41,7 @@ ${process.env.SELECLE_AGENTS === 'all' ? '  --agent kiro | claude | antigravity 
   --real  real agents even if SELECLE_ENGINE=mock is set in this shell`;
 
 const args = process.argv.slice(2);
-const command = ['host', 'join', 'login', 'logout', 'whoami', 'sync', 'soul', 'pair', 'autosync', 'guide', 'onboard', 'tools'].includes(args[0]) ? args.shift() : 'local';
+const command = ['host', 'join', 'login', 'logout', 'whoami', 'sync', 'soul', 'pair', 'autosync', 'guide', 'onboard', 'tools', 'kiro'].includes(args[0]) ? args.shift() : 'local';
 const opts = { port: undefined, code: undefined, guestsSummon: true, remote: 'origin', force: false, noSoul: false };
 let target = null;
 const positional = [];
@@ -184,6 +195,10 @@ if (command === 'login' || command === 'logout') {
     process.exit(0);
   }
   await toolsCheck({ force: true });
+} else if (command === 'kiro') {
+  const { kiroReport } = await import('../src/kiro/report.js');
+  console.log(kiroReport(path.resolve(target ?? '.')));
+  process.exit(0);
 } else if (command === 'onboard') {
   if (!process.stdin.isTTY || !process.stdout.isTTY) {
     console.error('selecle onboard needs an interactive terminal.');

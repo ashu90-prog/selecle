@@ -367,7 +367,7 @@ test('the Crypt asks Kiro through stdin, with no tools trusted', async () => {
     bin: () => process.execPath, label: 'Kiro CLI', viaStdin: true,
     argsFor: (p) => { seenArgs.push(p); return ['-e', 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.stringify({reply:"heard "+(s.includes("LATEST")?"all":"part"),summon:[],banish:[]})))']; },
   });
-  assert.deepEqual(await ask(`${'talk '.repeat(1000)}LATEST`), { reply: 'heard all', summon: [], banish: [] });
+  assert.deepEqual(await ask(`${'talk '.repeat(1000)}LATEST`), { reply: 'heard all', summon: [], banish: [], spec: null, build: null });
   assert.deepEqual(seenArgs, [null], 'the prompt is not put on the command line');
 });
 
@@ -382,7 +382,7 @@ test('a Kiro-like CLI that prefixes its answer with "> " still yields the plan',
   const log = path.join(dir, 'argv.json');
   fs.writeFileSync(fake, `const fs=require('fs');let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{fs.writeFileSync(${JSON.stringify(log)},JSON.stringify({argv:process.argv.slice(2),stdin:s.length}));console.log('> '+JSON.stringify({reply:'ok',summon:['dust the crypt'],banish:[]}));});`);
   const ask = argOracle({ bin: () => process.execPath, label: 'Kiro CLI', viaStdin: true, argsFor: () => [fake, ...KIRO_ORACLE_ARGS] });
-  assert.deepEqual(await ask('hello crypt'), { reply: 'ok', summon: ['dust the crypt'], banish: [] });
+  assert.deepEqual(await ask('hello crypt'), { reply: 'ok', summon: [{ task: 'dust the crypt', role: 'builder' }], banish: [], spec: null, build: null });
   const called = JSON.parse(fs.readFileSync(log, 'utf8'));
   assert.deepEqual(called.argv, KIRO_ORACLE_ARGS);
   assert.ok(called.stdin > 100, 'the whole prompt came through stdin');
@@ -403,12 +403,12 @@ const oracleFrom = (code) => argOracle({ bin: () => process.execPath, label: 'Te
 
 test('the Crypt through a CLI returns its plan', async () => {
   const ask = oracleFrom('console.log("Here you go: " + JSON.stringify({reply:"two spirits",summon:["a","b"],banish:["x"]}))');
-  assert.deepEqual(await ask('hello'), { reply: 'two spirits', summon: ['a', 'b'], banish: ['x'] });
+  assert.deepEqual(await ask('hello'), { reply: 'two spirits', summon: [{ task: 'a', role: 'builder' }, { task: 'b', role: 'builder' }], banish: ['x'], spec: null, build: null });
 });
 
 test('if the CLI answers in plain words, those words are the reply', async () => {
   const ask = oracleFrom('console.log("Just talking, no plan.")');
-  assert.deepEqual(await ask('hello'), { reply: 'Just talking, no plan.', summon: [], banish: [] });
+  assert.deepEqual(await ask('hello'), { reply: 'Just talking, no plan.', summon: [], banish: [], spec: null, build: null });
 });
 
 test('a failing or missing CLI makes the Crypt say why', async () => {

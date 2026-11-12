@@ -31,13 +31,40 @@ No Kiro CLI yet? selecle's tools page installs it (or: `irm https://cli.kiro.dev
 on Windows, `curl -fsSL https://cli.kiro.dev/install | bash` on macOS and Linux). To look around
 without an account, run `selecle --mock` for free pretend agents.
 
+## Kiro inside
+
+selecle is a multiplayer front end for Kiro's way of working:
+
+- **Specs first, then spirits.** Ask the Crypt for a feature ("add a dark mode toggle") and it
+  doesn't start coding. The **Scribe**, a Kiro agent that can only write in `.kiro/specs/`,
+  writes a proper Kiro spec: `requirements.md` (user stories, EARS acceptance criteria),
+  `design.md` and `tasks.md`. The file list opens it, and anyone in the room can read or edit it.
+  Say "build it" (or `/spec build <name>`) and spirits build it **one task at a time**, each on
+  its own git branch, each merged before the next starts, each ticking its task in `tasks.md`.
+- **Spirits are Kiro custom agents with roles.** `selecle-builder` writes code,
+  `selecle-tester` may only write tests, `selecle-chronicler` only docs, `selecle-scribe` only
+  specs, and `selecle-crypt` has no tools at all. The Crypt picks the role for each job; a
+  task line `_Spirit: tester_` picks it for spec tasks. selecle installs these into
+  `~/.kiro/agents/`, so `kiro-cli agent list` shows them and you can chat with any of them.
+- **The séance: an MCP server for the room.** Every spirit runs alone in its own git worktree,
+  but through `selecle mcp` it can still see the room: `room` (who's here, what the other
+  spirits are editing right now), `deeds` (who changed this file, and why), `spec` (the
+  project's specs and tasks) and `whisper` (ask the humans a question in the team chat). Add it
+  to your own Kiro too: `kiro-cli mcp add --name selecle --command selecle --args mcp`.
+- **Your steering rules everything.** The Crypt plans with the project's `.kiro/steering/`, and
+  every spirit loads it, including steering you haven't committed yet.
+
+`/spec` lists the specs and their progress, `/kiro` (or `selecle kiro`) shows the agents,
+steering and specs. In `--mock` mode the whole spec flow is acted out for free: try
+`feature: a dark mode toggle`, then `build dark-mode-toggle`.
+
 ## Start
 
 ```
 selecle
 ```
 
-The very first time, a welcome page asks for everything your ID card holds (name, avatar, colour, title, status, about, card style) and shows the agent it runs on: **[Kiro CLI](https://kiro.dev/cli)**. The Crypt and every spirit run through `kiro-cli chat --no-interactive` on your own Kiro account (tested with Kiro CLI 3.2.1); sign in with `selecle login` (which runs `kiro-cli login`), or set `KIRO_API_KEY` for headless use. Spirits get only Kiro's file tools (`read`, `write`, `glob`, `grep`): no shell, no web, no AWS. selecle reads each spirit's progress from Kiro's `--output-format stream-json` events. You can change your ID card later with `/settings`; `selecle onboard` shows the welcome page again.
+The very first time, a welcome page asks for everything your ID card holds (name, avatar, colour, title, status, about, card style) and shows the agent it runs on: **[Kiro CLI](https://kiro.dev/cli)**. The Crypt and every spirit run through `kiro-cli chat --no-interactive` on your own Kiro account (tested with Kiro CLI 3.2.1); sign in with `selecle login` (which runs `kiro-cli login`), or set `KIRO_API_KEY` for headless use. Spirits get only Kiro's file tools (`read`, `write`, `glob`, `grep`) and the séance: no shell, no web, no AWS. selecle reads each spirit's progress from Kiro's `--output-format stream-json` events. You can change your ID card later with `/settings`; `selecle onboard` shows the welcome page again.
 
 Two other agent CLIs (Claude Code and Antigravity CLI) are still supported but hidden. `--agent claude` or `--agent antigravity` uses one for a single run, and `SELECLE_AGENTS=all` shows them in the welcome page, `/settings` and `--help` again. A profile saved with one of them moves to Kiro on the next start and says so once.
 

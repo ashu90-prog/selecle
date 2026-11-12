@@ -38,6 +38,12 @@ export const STEPS = [
     fill: '/summon add a multiply function to src/math.js', coach: 'try: /summon add a multiply function to src/math.js',
   },
   {
+    id: 'spec', title: 'Plan a feature with a Kiro spec',
+    body: ['For something bigger, the Scribe (a Kiro agent) first writes a Kiro spec: requirements, design and tasks in .kiro/specs/. Read it, change it, then say "build it".',
+      'Spirits then build it one task at a time, each merged before the next. /spec shows every spec and how far along it is.'],
+    fill: '/spec a dark mode toggle', coach: 'try: /spec a dark mode toggle',
+  },
+  {
     id: 'feed', title: 'See what the spirits did',
     body: ['/feed lists every spirit: who raised it, how it ended, how long it took, what it cost, and the files it changed.'],
     run: '/feed', coach: 'try /feed',

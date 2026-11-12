@@ -83,6 +83,15 @@ export const currentBranch = (root) => gitSync(root, ['rev-parse', '--abbrev-ref
 
 const slug = (s) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'task';
 
+// A commit subject from a task: its first line, at most 72 characters. The whole task goes in the
+// body, so a long spec task does not turn the subject into a paragraph.
+export function commitSubject(prefix, task) {
+  const first = String(task ?? '').split(/\r?\n/)[0].replace(/\s+/g, ' ').trim();
+  const line = `${prefix}${first}`;
+  return line.length > 72 ? `${line.slice(0, 71).trimEnd()}…` : line;
+}
+const commitBody = (task) => (String(task ?? '').includes('\n') || `${task}`.length > 60 ? ['-m', String(task)] : []);
+
 // A fresh worktree on a new branch from the current HEAD.
 export async function openGrave(root, npc) {
   const id = Date.now().toString(36);
@@ -99,7 +108,7 @@ export async function sealGrave(grave, npc) {
   const owner = npc.owner ?? 'the coven';
   await git(grave.dir, [
     '-c', `user.name=${npc.name} (spirit of ${owner})`, '-c', 'user.email=spirits@selecle.local',
-    'commit', '-q', '-m', `${npc.name}: ${npc.task}`,
+    'commit', '-q', '-m', commitSubject(`${npc.name}: `, npc.task), ...commitBody(npc.task),
   ]);
   return git(grave.dir, ['rev-parse', '--short', 'HEAD']);
 }
@@ -112,7 +121,7 @@ export async function closeGrave(root, grave, { keepBranch = false } = {}) {
 // Merge a spirit branch into the current branch. Never leaves a half merge.
 export async function mergeGrave(root, grave, npc) {
   try {
-    await git(root, [...CRYPT_ID, 'merge', '--no-ff', '-q', '-m', `the Crypt seals ${npc.name}'s work: ${npc.task}`, grave.branch]);
+    await git(root, [...CRYPT_ID, 'merge', '--no-ff', '-q', '-m', commitSubject(`the Crypt seals ${npc.name}'s work: `, npc.task), ...commitBody(npc.task), grave.branch]);
     const sha = await git(root, ['rev-parse', '--short', 'HEAD']);
     const files = await git(root, ['diff', '--name-only', `${sha}^1`, sha]).then((t) => t.split('\n').filter(Boolean)).catch(() => []);
     return { ok: true, sha, files };

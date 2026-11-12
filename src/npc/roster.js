@@ -2,6 +2,7 @@ import path from 'node:path';
 import { fg } from '../ansi.js';
 import { NPC_RGB } from '../theme.js';
 import { pickAvatar } from '../avatars.js';
+import { steeringNote } from '../kiro/steering.js';
 
 const NAMES = [
   'Wisp', 'Ghoul', 'Wraith', 'Shade', 'Banshee', 'Specter',
@@ -41,7 +42,9 @@ export function createRoster({
     const base = npc.cwd ?? root;
     const abs = path.resolve(base, target);
     const rel = path.relative(base, abs);
-    const inside = rel && !rel.startsWith('..') && !path.isAbsolute(rel);
+    // The worktree itself (a spirit looking around): no file to show, not the grave's folder name.
+    if (!rel) return { target: null, targetAbs: null };
+    const inside = !rel.startsWith('..') && !path.isAbsolute(rel);
     return { target: inside ? rel : path.basename(abs), targetAbs: inside ? path.join(root, rel) : null };
   };
 
@@ -84,7 +87,14 @@ export function createRoster({
   }
 
   function launch(npc) {
-    npc.handle = engine({ cwd: npc.cwd ?? root, task: npc.task, name: npc.name, context: context(), onEvent: (ev) => onEvent(npc, ev) });
+    const cwd = npc.cwd ?? root;
+    // Steering not committed yet is missing from the spirit's worktree, so it travels in the context.
+    const shared = [context(), steeringNote(root, cwd)].filter(Boolean).join('\n\n');
+    npc.handle = engine({
+      cwd, task: npc.task, name: npc.name, context: shared, role: npc.role, spec: npc.spec, root,
+      spirit: { name: npc.name, kind: npc.avatar.kind, face: npc.avatar.face, rgb: npc.rgb, role: npc.role },
+      onEvent: (ev) => onEvent(npc, ev),
+    });
   }
 
   function start(npc) {
@@ -110,9 +120,13 @@ export function createRoster({
     }
   }
 
-  function summon(task) {
+  // opts: { role } a Kiro agent role (builder, tester, chronicler, scribe); { spec } when the
+  // spirit writes a spec or builds one of its tasks (see app.js).
+  function summon(task, { role = 'builder', spec = null } = {}) {
     const npc = {
       name: freeName(),
+      role,
+      spec,
       rgb: NPC_RGB[seq % NPC_RGB.length],
       color: fg(...NPC_RGB[seq % NPC_RGB.length]),
       avatar: pickAvatar([...npcs, ...others()].map((n) => n.avatar.kind), random),

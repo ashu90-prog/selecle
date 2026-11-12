@@ -18,7 +18,7 @@ export const STATUSES = ['haunting', 'brooding', 'away', 'busy'];
 export const CARD_STYLES = ['home', 'ember', 'toxic', 'bone', 'blood'];
 export const CRYPT_STYLES = ['brief', 'balanced', 'detailed'];
 // The quick-start steps (see guide.js) and what is saved about your progress.
-export const GUIDE_IDS = ['talk', 'slash', 'mention', 'summon', 'feed', 'replay', 'me', 'friends', 'devices'];
+export const GUIDE_IDS = ['talk', 'slash', 'mention', 'summon', 'spec', 'feed', 'replay', 'me', 'friends', 'devices'];
 export const cleanGuide = (g) => ({
   done: Array.isArray(g?.done) ? [...new Set(g.done.filter((id) => GUIDE_IDS.includes(id)))] : [],
   seen: g?.seen === true,

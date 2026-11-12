@@ -4,6 +4,9 @@ import { spawn } from 'node:child_process';
 import { claudeBin } from './npc/engines.js';
 import { stripAnsi } from './ansi.js';
 import { currentProvider, agyBin, kiroBin, DEFAULT_PROVIDER } from './auth.js';
+import { ROLE_NAMES, isRole, ensureAgents, agentName } from './kiro/agents.js';
+import { readSteering, steeringText } from './kiro/steering.js';
+import { listSpecs, specLine, specSlug } from './kiro/specs.js';
 
 // The Crypt is the common agent. Each consultation is one headless call that
 // sees the recent chat and the spirits list, and answers with a reply plus
@@ -13,8 +16,21 @@ const SCHEMA = {
   type: 'object',
   properties: {
     reply: { type: 'string' },
-    summon: { type: 'array', items: { type: 'string' } },
+    summon: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: { task: { type: 'string' }, role: { type: 'string', enum: ROLE_NAMES.filter((r) => r !== 'scribe') } },
+        required: ['task'],
+      },
+    },
     banish: { type: 'array', items: { type: 'string' } },
+    spec: {
+      type: ['object', 'null'],
+      properties: { name: { type: 'string' }, request: { type: 'string' } },
+      required: ['name', 'request'],
+    },
+    build: { type: ['string', 'null'] },
   },
   required: ['reply', 'summon', 'banish'],
 };
@@ -30,6 +46,13 @@ const SYSTEM = [
   'Examples of the right style: "Two spirits are rising. Wisp adds multiply to src/math.js, Ghoul writes its tests." / "Ana\'s spirit is already editing src/math.js, so I will wait for it before touching that file. The graveyard stays tidy." / "I can\'t share what Ana told me. I can tell you her spirit is working on the README."',
   'Only include code if someone asks to see some; then put it in a fenced code block.',
   'When someone asks for work on the project, put one clear, self-contained task per spirit in "summon", naming files when known.',
+  'Each summon has a role, the Kiro agent the spirit runs as: "builder" writes and edits code (the default), "tester" may only write tests, "chronicler" may only write docs (Markdown and text). Pick the role that fits the task.',
+  'Kiro specs: when someone asks for a feature that is bigger than one spirit\'s task (several steps or files, or a new capability), do not summon builders for it. Set "spec" to {"name": a short kebab-case name, "request": the full request in their words plus what you know}; the Scribe spirit then writes a Kiro spec (requirements, design, tasks) in .kiro/specs/<name>/ for the humans to review. Say so in your reply.',
+  'When someone approves a written spec ("build it", "looks good, go"), set "build" to its name: spirits then build its tasks one after another. Only build specs that exist in the list below, and never while that spec is already being built.',
+  'Small fixes and one-file changes are summoned directly, without a spec. If unsure, ask.',
+  'When you set "spec" or "build", leave "summon" empty: the Scribe and the spec\'s task spirits are raised for you, one at a time. Summoning spirits for the same work would do it twice.',
+  'Never make up spirit names: selecle names spirits when they rise. Say "a spirit" or "the Scribe".',
+  'The project\'s steering (below, if any) is the team\'s rules: plan work that follows it, and point out a request that breaks it.',
   'Summon as many spirits as the work needs or as the humans ask for, up to 10 at once; a queue runs them a few at a time.',
   'Split work so spirits never edit the same file at the same time; changes to one file belong to one spirit.',
   'If nobody asked for work, leave "summon" empty.',
@@ -56,8 +79,27 @@ function spiritLines(state) {
   return state.spirits().map((n) => {
     const doing = n.status === 'working' ? `${n.action}${n.target ? ` ${n.target}` : ''}` : n.status;
     const owner = n.owner ? `, summoned by ${n.owner.name}` : '';
-    return `- ${n.name} (${n.avatar.kind}${owner}): ${doing}. Task: ${n.task}`;
+    const role = n.role && n.role !== 'builder' ? `, ${n.role}` : '';
+    return `- ${n.name} (${n.avatar.kind}${role}${owner}): ${doing}. Task: ${n.task}`;
   });
+}
+
+// The project's Kiro side: steering (the team's rules), and specs with progress and whether
+// they are being written or built right now.
+function kiroLines(state) {
+  const steering = steeringText(readSteering(state.root), { max: 5000 });
+  const runs = state.specRuns?.() ?? new Map();
+  const specs = listSpecs(state.root).map((s) => {
+    const run = runs.get(s.name);
+    return `- ${specLine(s)}${run ? ` (${run})` : ''}`;
+  });
+  for (const [name, run] of runs) if (!specs.some((l) => l.startsWith(`- ${name}:`))) specs.push(`- ${name}: (${run})`);
+  return [
+    '',
+    'Kiro specs in this project (.kiro/specs):',
+    ...(specs.length ? specs : ['(none yet)']),
+    ...(steering ? ['', 'Project steering (.kiro/steering), the team\'s rules:', steering] : []),
+  ];
 }
 
 const DEEDS_SHOWN = 20;
@@ -98,6 +140,7 @@ export function buildPrompt(state) {
     ...(aboutLines(state).length ? ['What the humans say about themselves:', ...aboutLines(state)] : []),
     'Spirits:',
     ...(state.spirits().length ? spiritLines(state) : ['(none)']),
+    ...kiroLines(state),
     '',
     'Your ledger: who raised which spirit (oldest first; your own record, answer "who ran X?" from it):',
     ...(deedLines(state).length ? deedLines(state) : ['(no spirits raised yet)']),
@@ -134,11 +177,25 @@ export function briefFor(state) {
   ].filter(Boolean).join('\n\n');
 }
 
-function normalise(plan) {
+// A summon is a task string or { task, role }; it always comes out as { task, role }. The Scribe
+// is raised only through "spec", so a summon cannot ask for it.
+function summonOf(item) {
+  const task = typeof item === 'string' ? item : item?.task;
+  if (typeof task !== 'string' || !task.trim()) return null;
+  const role = typeof item?.role === 'string' ? item.role.toLowerCase() : 'builder';
+  return { task: task.trim(), role: isRole(role) && role !== 'scribe' ? role : 'builder' };
+}
+
+export function normalise(plan) {
+  const spec = plan?.spec && typeof plan.spec === 'object' && typeof plan.spec.request === 'string' && plan.spec.request.trim()
+    ? { name: specSlug(plan.spec.name || plan.spec.request.split(/\s+/).slice(0, 4).join(' ')) || 'feature', request: plan.spec.request.trim() }
+    : null;
   return {
     reply: typeof plan?.reply === 'string' ? plan.reply : '',
-    summon: Array.isArray(plan?.summon) ? plan.summon.filter((t) => typeof t === 'string' && t.trim()) : [],
+    summon: Array.isArray(plan?.summon) ? plan.summon.map(summonOf).filter(Boolean) : [],
     banish: Array.isArray(plan?.banish) ? plan.banish.filter((t) => typeof t === 'string') : [],
+    spec,
+    build: typeof plan?.build === 'string' && specSlug(plan.build) ? specSlug(plan.build) : null,
   };
 }
 
@@ -206,7 +263,7 @@ export function extractPlan(text) {
   return null;
 }
 
-const JSON_ONLY = `${'\n\n'}Reply with ONLY one JSON object and nothing else, shaped like: ${JSON.stringify({ reply: 'text for the humans', summon: ['task for a new spirit'], banish: ['spirit name'] })}. "summon" and "banish" may be empty arrays.`;
+const JSON_ONLY = `${'\n\n'}Reply with ONLY one JSON object and nothing else, shaped like: ${JSON.stringify({ reply: 'text for the humans', summon: [{ task: 'task for a new spirit', role: 'builder' }], banish: ['spirit name'], spec: null, build: null })}. "summon" and "banish" may be empty arrays; "spec" is null or {"name": "kebab-name", "request": "..."}; "build" is null or the name of a written spec.`;
 // Windows limits a command line to about 32,000 characters; the oldest talk is dropped first.
 const MAX_ARG_PROMPT = 24_000;
 
@@ -251,7 +308,7 @@ export function argOracle({ bin, argsFor, label, viaStdin = false }) {
       const text = stripAnsi(out).trim();
       const refused = TOOL_REFUSED.test(`${text}\n${err}`);
       if (refused) return reject(Object.assign(new Error(stripAnsi(err).trim() || text), { toolRefused: true }));
-      if (code === 0 && text) return resolve({ reply: text, summon: [], banish: [] });
+      if (code === 0 && text) return resolve(normalise({ reply: text }));
       reject(new Error(stripAnsi(err).trim() || `${label} gave no answer (exit ${code})`));
     });
   });
@@ -275,21 +332,39 @@ export const agyOracle = argOracle({ bin: agyBin, label: 'Antigravity CLI', args
 // Kiro CLI, the primary agent: no tools are trusted, so any tool it reaches for is refused, and the
 // prompt goes through stdin so the whole conversation fits whatever its length or quoting.
 export const KIRO_ORACLE_ARGS = ['chat', '--no-interactive', '--wrap', 'never'];
-export const kiroOracle = argOracle({ bin: kiroBin, label: 'Kiro CLI', viaStdin: true, argsFor: () => [...KIRO_ORACLE_ARGS] });
+// With selecle's agents installed it runs as selecle-crypt, a Kiro agent with no tools at all.
+export const kiroOracle = argOracle({
+  bin: kiroBin, label: 'Kiro CLI', viaStdin: true,
+  argsFor: () => [...KIRO_ORACLE_ARGS, ...(ensureAgents() ? ['--agent', agentName('crypt')] : [])],
+});
 export const ORACLES = { kiro: kiroOracle, claude: claudeOracle, antigravity: agyOracle };
 
-// Free stand-in: "task: a; b; c" summons one spirit per task,
+// Free stand-in: "task: a; b; c" summons one spirit per task ("test: ..." a tester, "docs: ..." a
+// chronicler), "feature: <request>" has the Scribe write a spec, "build <name>" builds one,
 // "banish <name>" banishes, "code" shows a sample code block.
 export async function mockOracle(prompt) {
   await new Promise((r) => setTimeout(r, 30));
   const last = prompt.match(/^Latest message from [^:]+: (.*)$/m)?.[1] ?? '';
-  const tasks = (last.match(/^task:\s*(.+)/i)?.[1] ?? '').split(';').map((t) => t.trim()).filter(Boolean);
+  const split = (re) => (last.match(re)?.[1] ?? '').split(';').map((t) => t.trim()).filter(Boolean);
+  const summon = [
+    ...split(/^task:\s*(.+)/i).map((task) => ({ task, role: 'builder' })),
+    ...split(/^test:\s*(.+)/i).map((task) => ({ task, role: 'tester' })),
+    ...split(/^docs:\s*(.+)/i).map((task) => ({ task, role: 'chronicler' })),
+  ];
   const banish = last.match(/^banish\s+(\S+)/i)?.[1];
+  const feature = last.match(/^feature:\s*(.+)/i)?.[1]?.trim();
+  const build = last.match(/^build\s+(\S+)/i)?.[1];
   let reply = 'The crypt hears you. (mock)';
-  if (tasks.length) reply = `**${tasks.length}** spirit${tasks.length > 1 ? 's' : ''} stir to answer you. (mock)`;
+  if (summon.length) reply = `**${summon.length}** spirit${summon.length > 1 ? 's' : ''} stir to answer you. (mock)`;
+  else if (feature) reply = 'That is a feature, so the Scribe will write a Kiro spec first. Review it, then tell me to build it. (mock)';
+  else if (build) reply = `The spirits will build ${build}, one task at a time. (mock)`;
   else if (banish) reply = 'Begone! (mock)';
   else if (/\bcode\b/i.test(last)) reply = 'Here is a tiny incantation:\n```js\nexport const add = (a, b) => a + b;\n```\nUse it wisely. (mock)';
-  return { reply, summon: tasks, banish: banish ? [banish] : [] };
+  return normalise({
+    reply, summon, banish: banish ? [banish] : [],
+    spec: feature ? { name: feature.replace(/^(a|an|the)\s+/i, '').split(/\s+/).slice(0, 3).join(' '), request: feature } : null,
+    build: build ?? null,
+  });
 }
 
 export function pickOracle(name = process.env.SELECLE_ENGINE, provider = currentProvider()) {

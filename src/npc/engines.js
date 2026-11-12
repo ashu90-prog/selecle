@@ -1,7 +1,9 @@
 import fs from 'node:fs';
+import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { stripAnsi } from '../ansi.js';
 import { currentProvider, agyBin, kiroBin, DEFAULT_PROVIDER } from '../auth.js';
+import { ensureAgents, agentName, isRole } from '../kiro/agents.js';
 
 // An engine runs one task headless and reports normalised events:
 //   { kind: 'action', verb, target?, detail? }  what the NPC is doing now
@@ -166,7 +168,7 @@ const rules = (name, context) => [
 // events; a line it cannot read is shown as something the spirit said. The run ends with the
 // process: a "done" event from `parse` wins, otherwise exit code 0 means it worked.
 // `input`, when given, is written to the CLI's stdin (used for prompts too long for a command line).
-export function cliEngine({ bin, args, cwd, onEvent, parse = null, label, input = null }) {
+export function cliEngine({ bin, args, cwd, onEvent, parse = null, label, input = null, env = null }) {
   let finished = false;
   let lastSay = '';
   let errText = '';
@@ -189,7 +191,7 @@ export function cliEngine({ bin, args, cwd, onEvent, parse = null, label, input 
     }
   };
 
-  const child = spawn(bin, args, { cwd, stdio: [input == null ? 'ignore' : 'pipe', 'pipe', 'pipe'], windowsHide: true });
+  const child = spawn(bin, args, { cwd, stdio: [input == null ? 'ignore' : 'pipe', 'pipe', 'pipe'], windowsHide: true, ...(env ? { env } : {}) });
   if (input != null) {
     child.stdin.on('error', () => { /* the CLI closed early; its exit tells the story */ });
     child.stdin.end(input);
@@ -234,9 +236,12 @@ export const KIRO_MAX_ARG = 24_000;
 
 // `stream: true` asks for JSON Lines events (`--output-format stream-json`, Kiro CLI 3.x), which
 // name each tool call and its path. Without it, Kiro 3.x prints tool activity on stderr only.
-export function kiroArgs(prompt, { tools = KIRO_SPIRIT_TOOLS, model = process.env.SELECLE_NPC_MODEL, stream = false } = {}) {
+// `agent` runs a Kiro custom agent (src/kiro/agents.js); its config then decides the tools, so
+// pass `tools: null` with it (--trust-tools would widen a role's write limits).
+export function kiroArgs(prompt, { tools = KIRO_SPIRIT_TOOLS, model = process.env.SELECLE_NPC_MODEL, stream = false, agent = null } = {}) {
   const args = ['chat', '--no-interactive', '--wrap', 'never'];
   if (stream) args.push('--output-format', 'stream-json');
+  if (agent) args.push('--agent', agent);
   if (tools?.length) args.push(`--trust-tools=${tools.join(',')}`);
   if (model) args.push('--model', model);
   const viaStdin = prompt.length > KIRO_MAX_ARG;
@@ -281,6 +286,9 @@ export function parseKiroLine(raw) {
 // `tool_call` with `_meta.kiro.toolName` and `locations[].path`), and `runFinished` ends the run
 // with `status` and `finalText`. Text pieces are joined and said as one message before the next
 // tool call. Lines that are not JSON fall back to the plain-text reader. One parser per run.
+// The séance's tools (src/seance.js) as spirit actions.
+const SEANCE_VERBS = { room: 'consulting the séance', deeds: 'reading the ledger', spec: 'reading the spec', whisper: 'whispering to the coven' };
+
 export function kiroStreamParser() {
   let pending = '';
   const flush = () => {
@@ -308,6 +316,12 @@ export function kiroStreamParser() {
     }
     if (up.sessionUpdate === 'agent_thought_chunk') return [{ kind: 'action', verb: 'brooding' }];
     if (up.sessionUpdate === 'tool_call') {
+      const server = up._meta?.kiro?.mcpServerName;
+      if (server) {
+        const tool = String(up._meta?.kiro?.toolName ?? '');
+        const verb = server === 'selecle' ? (SEANCE_VERBS[tool] ?? 'consulting the séance') : `asking ${server}`;
+        return [...flush(), { kind: 'action', verb, target: null, detail: server === 'selecle' ? null : tool }];
+      }
       const tool = up._meta?.kiro?.toolName || up.kind || 'tool';
       const target = up.locations?.[0]?.path ?? up.rawInput?.path ?? null;
       return [...flush(), { kind: 'action', verb: verbFor(tool), target }];
@@ -316,18 +330,39 @@ export function kiroStreamParser() {
   };
 }
 
-export function kiroEngine({ cwd, task, name, context, onEvent }) {
-  const { args, input } = kiroArgs(`${rules(name, context)}\n\nYour task: ${task}`, { stream: true });
-  return cliEngine({ bin: kiroBin(), args, input, cwd, onEvent, parse: kiroStreamParser(), label: 'Kiro CLI' });
+// A spirit runs as its role's Kiro custom agent (selecle-builder, -tester, -chronicler, -scribe),
+// which carries the role's prompt, write limits, the project's steering and the séance MCP
+// server. SELECLE_PROJECT and SELECLE_SPIRIT tell the séance which room and which spirit it serves.
+// Without the agents (switched off, or not writable) it runs as plain Kiro with file tools.
+export function kiroEngine({ cwd, task, name, context, onEvent, role = 'builder', root = null, spirit = null }) {
+  const agent = ensureAgents() ? agentName(isRole(role) ? role : 'builder') : null;
+  const prompt = agent
+    ? `You are ${name}.${context ? `\n\nShared team context (for background only):\n${context}` : ''}\n\nYour task: ${task}`
+    : `${rules(name, context)}\n\nYour task: ${task}`;
+  const { args, input } = kiroArgs(prompt, { stream: true, agent, tools: agent ? null : KIRO_SPIRIT_TOOLS });
+  const env = { ...process.env, SELECLE_PROJECT: root ?? cwd, SELECLE_SPIRIT: JSON.stringify({ name, role, ...(spirit ?? {}) }) };
+  return cliEngine({ bin: kiroBin(), args, input, cwd, onEvent, env, parse: kiroStreamParser(), label: 'Kiro CLI' });
 }
 
 // Pretends to work without spending anything. Used by tests and demos.
-export function mockEngine({ cwd, task, onEvent, stepMs = 700 }) {
+export function mockEngine({ cwd, task, onEvent, stepMs = 700, role = 'builder', spec = null }) {
   let files = [];
   try {
     files = fs.readdirSync(cwd, { withFileTypes: true }).filter((e) => e.isFile()).map((e) => e.name);
   } catch {
     // An empty crypt is fine.
+  }
+  // The spec flow, acted out for free: the Scribe writes a small spec, a task spirit ticks its task.
+  const specAct = spec ? mockSpecWork({ cwd, role, spec }) : null;
+  if (specAct) {
+    const steps = [
+      { kind: 'action', verb: 'consulting the séance' },
+      { kind: 'action', verb: 'reading', target: files.find((f) => /readme/i.test(f)) ?? files[0] ?? null },
+      ...specAct.steps,
+      { kind: 'done', ok: true, summary: specAct.summary },
+    ];
+    const timers = steps.map((ev, i) => setTimeout(() => { if (ev.run) ev.run(); else onEvent(ev); }, stepMs * (i + 1)));
+    return { kill() { timers.forEach(clearTimeout); } };
   }
   const steps = [
     { kind: 'action', verb: 'brooding' },
@@ -342,6 +377,39 @@ export function mockEngine({ cwd, task, onEvent, stepMs = 700 }) {
     kill() {
       timers.forEach(clearTimeout);
     },
+  };
+}
+
+// What a pretend spirit does for the spec flow. The Scribe writes requirements, design and tasks
+// for the request; a task spirit adds a small note file for its task and ticks it in tasks.md.
+function mockSpecWork({ cwd, role, spec }) {
+  const dir = path.join(cwd, '.kiro', 'specs', spec.name);
+  const rel = (f) => path.posix.join('.kiro/specs', spec.name, f);
+  const write = (file, text) => { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, text); };
+  if (spec.kind === 'write') {
+    const request = spec.request || spec.name;
+    const docs = {
+      'requirements.md': `# Requirements: ${spec.name}\n\n## Introduction\n\n(mock) ${request}\n\n## Requirements\n\n### Requirement 1: The feature works\n\n**User Story:** As a user, I want ${request}, so that the project does what we asked.\n\n#### Acceptance Criteria\n\n1. WHEN someone uses it THEN the project SHALL do what was asked\n\n### Requirement 2: It is documented\n\n**User Story:** As a teammate, I want a short note on it, so that I know it exists.\n\n#### Acceptance Criteria\n\n1. WHEN the feature lands THEN the README SHALL mention it\n`,
+      'design.md': `# Design: ${spec.name}\n\n## Overview\n\n(mock) One small module and a note.\n\n## Testing Strategy\n\nOne test for the main path.\n`,
+      'tasks.md': `# Implementation Plan: ${spec.name}\n\n- [ ] 1. Build the core of ${spec.name}\n  - _Requirements: 1.1_\n- [ ] 2. Test it\n  - _Spirit: tester_\n  - _Requirements: 1.1_\n- [ ] 3. Mention it in the docs\n  - _Spirit: chronicler_\n  - _Requirements: 2.1_\n`,
+    };
+    return {
+      steps: Object.entries(docs).map(([f, text]) => ({ kind: 'action', verb: 'writing', target: rel(f), run: null, text, file: path.join(dir, f) }))
+        .flatMap((ev) => [{ run: () => write(ev.file, ev.text) }, { kind: 'action', verb: ev.verb, target: ev.target }]),
+      summary: `(mock) Wrote the spec ${spec.name}: 2 requirements, 3 tasks.`,
+    };
+  }
+  const tasks = path.join(dir, 'tasks.md');
+  const note = path.join(cwd, `${spec.name}-task-${spec.number}.md`);
+  return {
+    steps: [
+      { kind: 'action', verb: 'reading the spec' },
+      { run: () => write(note, `(mock) ${role} did task ${spec.number} of ${spec.name}.\n`) },
+      { kind: 'action', verb: 'writing', target: path.basename(note) },
+      { run: () => { try { write(tasks, fs.readFileSync(tasks, 'utf8').replace(`- [ ] ${spec.number}.`, `- [x] ${spec.number}.`)); } catch { /* no tasks file */ } } },
+      { kind: 'action', verb: 'editing', target: rel('tasks.md') },
+    ],
+    summary: `(mock) Did task ${spec.number} of ${spec.name} and ticked it.`,
   };
 }
 

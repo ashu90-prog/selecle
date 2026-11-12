@@ -73,14 +73,14 @@ export function createRemoteHost({ root, write, mirror, tell = () => {}, askTime
       });
     },
     // A spirit run by the friend's own agent, in the friend's copy of the project.
-    engine({ task, name, context, onEvent }) {
+    engine({ task, name, context, onEvent, role = 'builder', spec = null }) {
       if (!client) {
         queueMicrotask(() => onEvent({ kind: 'done', ok: false, summary: NEEDS_CLIENT }));
         return { kill() {} };
       }
       const key = id();
       runs.set(key, onEvent);
-      write(encodeCtl('run', { id: key, task, name, context, project: path.basename(root) }));
+      write(encodeCtl('run', { id: key, task, name, context, role, spec, project: path.basename(root) }));
       return {
         kill() {
           runs.delete(key);
@@ -168,6 +168,8 @@ export function createRemoteClient({ send, say = () => {}, agents = {}, home = w
             task: msg.task,
             name: msg.name,
             context: msg.context,
+            role: typeof msg.role === 'string' ? msg.role : 'builder',
+            spec: msg.spec && typeof msg.spec === 'object' ? msg.spec : null,
             onEvent: async (ev) => {
               if (finished) return;
               if (ev.kind !== 'done') return send('ev', { id: msg.id, ev: { ...ev, target: relative(ev.target) } });

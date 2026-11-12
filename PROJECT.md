@@ -125,6 +125,15 @@ Command line:
 
 ## 5. Everything you can do: features and commands
 
+### Kiro inside (ADR-027)
+- Ask for a feature and the **Scribe** (a Kiro agent limited to `.kiro/specs/`) writes a Kiro spec:
+  requirements (EARS), design, tasks. Review it, say "build it" (or `/spec build <name>`), and spirits
+  build it one task at a time, each merged before the next, each ticking its task. `/spec` lists specs.
+- Spirits are **Kiro custom agents** with roles: builder, tester (tests only), chronicler (docs only),
+  scribe (specs only); the Crypt is `selecle-crypt` with no tools. Installed into `~/.kiro/agents/`.
+- **The séance** (`selecle mcp`): an MCP server every spirit gets: `room`, `deeds`, `spec`, `whisper`.
+- The project's **steering** guides the Crypt and every spirit. `/kiro` / `selecle kiro` show it all.
+
 ### Talking and spirits
 - Type anything: talk to **the Crypt**. Replies come in **clean short paragraphs** and are written
   out word by word in the live app; while it thinks, a line cycles phrases ("consults the bones...").
@@ -333,6 +342,7 @@ Full text in `Memory/Decisions.md`.
 | 024 | Public address by tunnel, on demand |
 | 025 | Friends edit in their own editor on a synced copy, and may bring their own AI |
 | 026 | Kiro CLI is the primary agent; Claude Code and Antigravity are hidden |
+| 027 | Kiro-native spirits: specs first, agents with roles, the séance MCP server, steering |
 
 Later refinements recorded in the changelog: the restart button (ADR-022), the Crypt staying on
 the host in own-AI mode (ADR-025), `trust everyone`.
@@ -429,9 +439,10 @@ fixed so empty repos in big folders get the same safety questions, and lock erro
 
 ## 13. Known limits and honest gaps
 
-- **Kiro CLI path** is written from kiro.dev documentation and tested end to end against a stand-in
-  kiro-cli, but has never run against a real install (none on the build machine). Kiro's plain-text
-  tool lines are read loosely; real output may need the parser adjusted.
+- **Kiro CLI** is verified against a real 3.2.1 install (spec flow, roles, séance, steering). The
+  stream-json event shapes and agent behaviour may change in later Kiro versions.
+- **Spec tasks run one at a time**, so a long spec is slow; a task that merges nothing pauses the build.
+- **The séance on a guest's machine** (own-AI mode) sees only the guest's copy, not the room's log.
 - **Antigravity** has no sign-in check (installed means go ahead).
 - **Public tunnels** were never run from the build machine; localhost.run dropped a Codespace
   connection; Cloudflare's path is untested for real.
@@ -444,7 +455,8 @@ fixed so empty repos in big folders get the same safety questions, and lock erro
 - **Interactive flows** (welcome page, restart, folder switching) were tested with stand-ins, not
   driven in a real terminal by the builder.
 - **The official 2026 hackathon rules** have not been read.
-- **Kiro use** for the hackathon is at zero.
+- **Kiro use while building selecle** is still thin: selecle uses Kiro deeply, but this repo's own specs
+  are hand-written by Claude Code (ADR-021). Next: build a selecle feature through its own Scribe.
 
 ---
 

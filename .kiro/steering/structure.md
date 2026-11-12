@@ -9,7 +9,13 @@ inclusion: always
 - `src/auth.js`: agent CLI table (Kiro first), sign-in checks, shown vs hidden agents.
 - `src/npc/engines.js`: one spirit engine per agent CLI, plus the mock.
 - `src/npc/roster.js`: spirit lifecycle (waiting, working, resting, fallen).
-- `src/crypt.js`: the Crypt's prompt and one voice (oracle) per agent CLI.
+- `src/crypt.js`: the Crypt's prompt and one voice (oracle) per agent CLI. Plans: reply, summon
+  `[{task, role}]`, banish, spec `{name, request}`, build `name`.
+- `src/kiro/agents.js`: the spirit roles as Kiro custom agents (`~/.kiro/agents/selecle-*.json`).
+- `src/kiro/specs.js`, `src/kiro/specrun.js`: Kiro specs; the Scribe writes one, spirits build its
+  tasks in order.
+- `src/kiro/steering.js`: reads `.kiro/steering` for the Crypt and for spirits' worktrees.
+- `src/seance.js`: the séance, selecle's MCP server (`selecle mcp`): room, deeds, spec, whisper.
 - `src/app.js`, `src/render.js`, `src/dialog.js`, `src/onboard.js`: TUI, settings, welcome page.
 - `src/git.js`, `src/context.js`, `src/sync.js`, `src/vault.js`: git-as-database, event log, sealed sync.
 - `src/telnet.js`, `src/ws.js`, `src/remote.js`, `src/mirror.js`, `src/tunnel.js`: multiplayer doors.

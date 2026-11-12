@@ -10,6 +10,9 @@ import { render, isRising, revealing } from './render.js';
 import { createRoster } from './npc/roster.js';
 import { pickEngine } from './npc/engines.js';
 import { buildPrompt, briefFor, pickOracle } from './crypt.js';
+import { createSpecRunner } from './kiro/specrun.js';
+import { listSpecs, specLine, specSlug } from './kiro/specs.js';
+import { kiroReport } from './kiro/report.js';
 import { makeIdentity, createContextStore, lookalikes } from './context.js';
 import { editProfile, editPrefs, adoptSoul } from './profile.js';
 import { openDialog, openPicker, handleDialogKey, handleDialogMouse } from './dialog.js';
@@ -61,10 +64,10 @@ function keepCursor(state, fn) {
 }
 
 const humanWho = (p) => ({ name: p.name, glyph: p.glyph ?? '☠', color: fg(...p.rgb), rgb: p.rgb, human: true });
-const spiritWho = (s) => ({ name: s.name, glyph: s.face, color: fg(...s.rgb), kind: s.kind });
+const spiritWho = (s) => ({ name: s.name, glyph: s.face ?? '☽', color: fg(...(s.rgb ?? [180, 180, 200])), kind: s.kind });
 
 const snapshot = (npc) => ({
-  name: npc.name, task: npc.task, status: npc.status, action: npc.action,
+  name: npc.name, task: npc.task, status: npc.status, action: npc.action, role: npc.role ?? 'builder',
   target: npc.target, detail: npc.detail, kind: npc.avatar.kind, face: npc.avatar.face,
   rgb: npc.rgb, startedAt: npc.startedAt, endedAt: npc.endedAt, bornAt: npc.bornAt,
 });
@@ -90,7 +93,8 @@ function note(state, text, extra = {}) {
 
 const HELP = 'Just talk to me and I will send spirits to do the work. '
   + 'Each spirit works on its own git branch and I merge its work when it is done. '
-  + 'Shortcuts: /summon <task> raises a spirit directly (separate several with ;), /banish <name|all> sends spirits away, '
+  + 'Ask for a bigger feature and I have the Scribe write a Kiro spec (requirements, design, tasks) in .kiro/specs/ first; once you approve it ("build it"), spirits build it one task at a time. Spirits are Kiro agents with roles: builders write code, testers only tests, chroniclers only docs, and all of them follow the project\'s .kiro/steering. '
+  + 'Shortcuts: /summon <task> raises a spirit directly (separate several with ;), /spec <feature> has the Scribe write a spec, /spec build <name> builds one, /spec lists them, /kiro shows the Kiro side, /banish <name|all> sends spirits away, '
   + '/history shows the latest commits, /settings (or /me) opens your ID card and settings, /feed shows every spirit and what it did, /replay is the time machine, /sync syncs the history between your devices right now (it also happens by itself), /invite opens the door so friends can join this crypt, /open <file> edits a project file (/open <folder path> opens that folder as the project, made a git project if it is not one) and /run <command> runs one (guests need /invite trust <name>), /code opens your editor, /folder opens the folder browser to switch the project (double-tap empty space in the file list opens the whole project in your code editor), /pair <join code> joins a friend whose /invite showed it; /pair alone shows a code to link another device of yours. Type / to browse commands and ready-made prompts, @ to pick a file. The coven column is for talking with your friends; I can read it too.';
 
 export function createState(root, {
@@ -188,6 +192,8 @@ export function createState(root, {
           files: (npc.files ?? []).slice(0, 12),
         });
         if (state.me.prefs?.bell) state.bell?.();
+        // A spec's Scribe or task spirit has ended: move the spec along (the merge is done by now).
+        if (npc.spec) state.specs.spiritDone(npc);
       }
       publish(state, 'spirit', { spirit: snapshot(npc) });
       followSpirit(state, npc);
@@ -199,7 +205,27 @@ export function createState(root, {
       publish(state, 'whisper', { from: 'spirit', spirit: snapshot(npc), text, failed });
     },
   });
+
+  // Kiro specs: the Scribe writes one, then spirits build its tasks in order (src/kiro/specrun.js).
+  state.specs = createSpecRunner({
+    root,
+    summon: (task, opts) => summon(state, [{ task, ...opts }], { quiet: true })[0] ?? null,
+    say: (text, extra = {}) => {
+      crypt(state, text, { notice: true, failed: extra.failed });
+      if (extra.written) showSpec(state, extra.spec);
+      state.redraw();
+    },
+  });
+  state.specRuns = () => state.specs.status();
   return state;
+}
+
+// Point the file list at a freshly written spec.
+function showSpec(state, name) {
+  keepCursor(state, () => {
+    refresh(state.tree);
+    reveal(state.tree, `.kiro/specs/${name}/requirements.md`);
+  });
 }
 
 // Keep the tree current and show the file a spirit is working on.
@@ -220,7 +246,9 @@ export function applyEvent(state, ev, { replay = false } = {}) {
     const mine = ev.by.uid ? ev.by.uid === state.me.uid : ev.by.name === state.me.name;
     (mine ? state.messages : state.overheard).push(msg);
   } else if (ev.type === 'friend') {
-    state.friends.push({ at: ev.at, who: humanWho(ev.by), text: ev.text });
+    // A spirit can whisper to the coven through the séance (src/seance.js).
+    const who = ev.from === 'spirit' ? spiritWho({ ...ev.spirit, name: `${ev.spirit?.name ?? ev.by.name} (spirit)` }) : humanWho(ev.by);
+    state.friends.push({ at: ev.at, who, text: ev.text });
   } else if (ev.type === 'spirit') {
     const key = `${ev.by.session}:${ev.spirit.name}`;
     if (ev.spirit.status === 'banished') state.remote.delete(key);
@@ -260,34 +288,40 @@ function rememberEvent(ev) {
 }
 
 const listNames = (npcs) => {
-  const names = npcs.map((n) => `${n.name} the ${n.avatar.kind}`);
+  const names = npcs.map((n) => `${n.name} the ${n.avatar.kind}${n.role && n.role !== 'builder' ? ` (${n.role})` : ''}`);
   return names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names.at(-1)}` : names[0];
 };
 
 // The Crypt's ledger: which human ran which spirit, on whose account, and how it ended.
 // Kept in the shared log, so it is remembered across sessions.
 function deed(state, phase, npc, extra = {}) {
-  const d = { phase, spirit: npc.name, kind: npc.avatar.kind, task: npc.task, viaHost: Boolean(state.me.viaHost), ...extra };
+  const d = { phase, spirit: npc.name, kind: npc.avatar.kind, role: npc.role ?? 'builder', task: npc.task, viaHost: Boolean(state.me.viaHost), ...extra };
   state.deeds.push({ at: Date.now(), by: { uid: state.me.uid, name: state.me.name, glyph: state.me.glyph }, ...d });
   publish(state, 'deed', d);
 }
 
-// Summon several spirits with one quiet notice instead of one per spirit.
-function summon(state, tasks) {
+// Summon several spirits with one quiet notice instead of one per spirit. A task is a string or
+// { task, role, spec }. Returns the spirits raised ([] when this person may not summon).
+// `quiet` leaves the notice to the caller (the spec runner says it its own way).
+function summon(state, tasks, { quiet = false } = {}) {
   // The host can let guests chat and browse without raising spirits on the host's account.
   if (state.me.canSummon === false) {
     crypt(state, 'The host has not given you leave to summon spirits here. You may still talk and browse.', { notice: true });
-    return;
+    return [];
   }
-  const npcs = tasks.map((t) => state.roster.summon(t));
+  const npcs = tasks.map((t) => (typeof t === 'string'
+    ? state.roster.summon(t)
+    : state.roster.summon(t.task, { role: t.role ?? 'builder', spec: t.spec ?? null })));
   if (npcs.length) markDid(state, 'summon');
   npcs.forEach((npc) => { deed(state, 'raised', npc); publish(state, 'spirit', { spirit: snapshot(npc) }); });
+  if (quiet) return npcs;
   const rising = npcs.filter((n) => n.status !== 'waiting');
   const waiting = npcs.filter((n) => n.status === 'waiting');
   const parts = [];
   if (rising.length) parts.push(`${listNames(rising)} ${rising.length > 1 ? 'rise' : 'rises'} from the ground...`);
   if (waiting.length) parts.push(`${listNames(waiting)} ${waiting.length > 1 ? 'wait' : 'waits'} for a free grave.`);
   if (parts.length) crypt(state, parts.join(' '), { notice: true });
+  return npcs;
 }
 
 // Banish this terminal's own spirits by name (or "all").
@@ -295,6 +329,7 @@ function banishLocal(state, who) {
   const targets = state.roster.npcs.filter((n) => who === 'all' || n.name.toLowerCase() === who.toLowerCase());
   const gone = state.roster.banish(who);
   targets.filter((n) => !n.deedEnd).forEach((n) => { n.deedEnd = true; deed(state, 'banished', n); });
+  targets.filter((n) => n.spec).forEach((n) => state.specs.cancel(n));
   gone.forEach((name) => publish(state, 'spirit', { spirit: { name, status: 'banished' } }));
   return gone;
 }
@@ -320,8 +355,15 @@ export async function consult(state) {
   try {
     const plan = await state.oracle(buildPrompt(state));
     if (plan.reply) crypt(state, plan.reply);
-    plan.banish.forEach((who) => banish(state, who));
-    summon(state, plan.summon.slice(0, MAX_SUMMONS));
+    (plan.banish ?? []).forEach((who) => banish(state, who));
+    // A spec raises its own spirits (the Scribe, then one per task, in order); summons for the
+    // same work alongside it would do it twice, so they are dropped.
+    if (plan.spec || plan.build) {
+      if (plan.spec) specWrite(state, plan.spec.name, plan.spec.request);
+      if (plan.build) specBuild(state, plan.build);
+    } else {
+      summon(state, (plan.summon ?? []).slice(0, MAX_SUMMONS));
+    }
   } catch (e) {
     crypt(state, `The Crypt is silent: ${e.message}`, { failed: true });
   }
@@ -331,6 +373,40 @@ export async function consult(state) {
     return consult(state);
   }
   state.redraw();
+}
+
+// ---- Kiro specs ------------------------------------------------------------------------------
+
+function specWrite(state, name, request) {
+  const r = state.specs.write(name, request);
+  if (r.ok) markDid(state, 'spec');
+  if (r.ok) crypt(state, `${r.npc.name} the ${r.npc.avatar.kind} (scribe) rises to write the Kiro spec ${r.name}: requirements, design and tasks in .kiro/specs/${r.name}/.`, { notice: true });
+  else if (r.text) crypt(state, r.text, { notice: true, failed: true });
+}
+
+function specBuild(state, name) {
+  const r = state.specs.build(name);
+  if (!r.ok && r.text) crypt(state, r.text, { notice: true, failed: true });
+}
+
+// /spec                 the specs and how far along they are
+// /spec build <name>    build one, task by task
+// /spec [name:] <what>  the Scribe writes (or revises) a spec
+function specCommand(state, arg) {
+  const build = arg.match(/^(?:build|run)\s+(\S+)/i);
+  if (build) return specBuild(state, build[1]);
+  if (!arg) {
+    const runs = state.specs.status();
+    const specs = listSpecs(state.root);
+    return note(state, specs.length || runs.size
+      ? ['Kiro specs in .kiro/specs:', ...specs.map((s) => `- ${specLine(s)}${runs.has(s.name) ? ` (${runs.get(s.name)})` : ''}`),
+        ...[...runs].filter(([n]) => !specs.some((s) => s.name === n)).map(([n, r]) => `- ${n}: ${r}`),
+        '', '/spec build <name> builds one; /spec <feature> writes a new one.'].join('\n')
+      : 'No Kiro specs yet. /spec <feature> has the Scribe write one (requirements, design, tasks), or just ask me for a feature.');
+  }
+  const named = arg.match(/^([a-z0-9][a-z0-9-]{1,47}):\s*(.+)$/i);
+  const name = named ? named[1] : specSlug(arg.split(/\s+/).slice(0, 4).join(' '));
+  return specWrite(state, name, named ? named[2] : arg);
 }
 
 function whisper(state, text) {
@@ -349,6 +425,10 @@ function runCommand(state, text) {
     else summon(state, arg.split(';').map((t) => t.trim()).filter(Boolean));
   } else if (cmd === '/banish') {
     banish(state, arg || 'all');
+  } else if (cmd === '/spec' || cmd === '/specs') {
+    specCommand(state, arg);
+  } else if (cmd === '/kiro') {
+    note(state, kiroReport(state.root, { install: false }));
   } else if (cmd === '/help') {
     crypt(state, HELP);
   } else if (['/settings', '/me', '/name', '/avatar', '/color', '/about', '/title', '/status'].includes(cmd)) {

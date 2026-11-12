@@ -8,7 +8,11 @@ inclusion: always
 - **Runtime:** Node.js >= 18, plain JavaScript ES modules, **zero npm dependencies**. Keep it that way.
 - **Tests:** `npm test` (`node --test`). Tests never spend money: use `mockEngine` / `mockOracle`,
   stand-in runners, or `node -e` scripts as fake CLIs. Every bug fix gets a test.
-- **Agents:** spawned CLIs, never SDKs.
+- **Agents:** spawned CLIs, never SDKs. Spirits run as Kiro custom agents by role
+  (`--agent selecle-builder|tester|chronicler|scribe`, the Crypt as `selecle-crypt`); configs carry
+  both v2 fields and v3 `permissions`. Each gets the séance MCP server (`selecle mcp`, stdio, no
+  dependencies) and loads `.kiro/steering`. Kiro's own spec mode is not used headless: it needs
+  `--trust-all-tools` (shell).
   - Kiro CLI spirit: `kiro-cli chat --no-interactive --wrap never --trust-tools=read,write,glob,grep <prompt>`
     (prompt on stdin when over 24,000 characters).
   - Kiro CLI Crypt: `kiro-cli chat --no-interactive --wrap never`, prompt on stdin, no trusted tools.

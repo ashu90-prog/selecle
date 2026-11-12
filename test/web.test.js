@@ -281,7 +281,7 @@ test('if the agent reaches for a tool and is refused, the Crypt asks once more, 
       else { console.log('etski: no output produced - a tool required the "command" permission that headless mode cannot prompt for, so it was auto-denied.'); process.exit(1); }
     `, prompt, runs],
   });
-  assert.deepEqual(await ask('hello'), { reply: 'hello back', summon: [], banish: [] });
+  assert.deepEqual(await ask('hello'), { reply: 'hello back', summon: [], banish: [], spec: null, build: null });
   assert.equal(fs.readFileSync(runs, 'utf8'), 'xx', 'asked twice');
 });
 
