@@ -12,10 +12,12 @@ stitched into one zero-dependency Node app.
 
 | | |
 |---|---|
-| ![Welcome page and ID card](docs/screenshots/welcome.png) | ![The Crypt raising a spirit](docs/screenshots/crypt.png) |
-| Welcome page: your ID card and the agent selecle runs on | Ask the Crypt; it raises a spirit for the job |
-| ![Two friends in one project over Telnet](docs/screenshots/multiplayer.png) | ![The time machine](docs/screenshots/replay.png) |
-| Friends join one project from any terminal | `/feed` and `/replay`: every spirit's deed, kept in git |
+| ![The Crypt raising a spirit](docs/screenshots/crypt.png) | ![The quick start guide](docs/screenshots/welcome.png) |
+| Ask the Crypt; it raises a spirit, and the work is sealed into git | A built-in guide shows you around |
+| ![Two friends in one project](docs/screenshots/multiplayer.png) | ![The time machine](docs/screenshots/replay.png) |
+| Friends join one project from any terminal | `/replay`: step through every spirit's deed, branch from any point |
+| ![Your ID card](docs/screenshots/settings.png) | |
+| `/settings`: pixel avatar ID card, running on Kiro CLI | |
 
 ## Quick start
 
