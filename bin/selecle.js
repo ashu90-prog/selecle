@@ -330,6 +330,8 @@ if (command === 'login' || command === 'logout') {
   }
   const { profile } = r;
   console.log(`${profile.name}  ·  ${profile.provider}${profile.plan ? ` (${profile.plan})` : ''}${profile.guest ? '  ·  guest, pretend agents' : ''}`);
+  const { loadDevice } = await import('../src/device.js');
+  console.log(`this device: ${loadDevice().id}  (hosts know this computer by it, not by your name)`);
 } else if (command === 'guide') {
   const { STEPS } = await import('../src/guide.js');
   console.log('\nselecle quick start. Everything below is also in the app: type /guide.\n');

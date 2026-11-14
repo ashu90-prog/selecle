@@ -148,7 +148,7 @@ export function createContextStore({ root, me, onEvent = () => {}, restore = () 
   const history = readNew().sort((a, b) => a.at - b.at).slice(-HISTORY);
 
   function append(type, data = {}) {
-    const ev = { id: crypto.randomUUID(), at: Date.now(), by: { session: me.session, uid: me.uid, name: me.name, rgb: me.rgb, glyph: me.glyph }, type, ...data };
+    const ev = { id: crypto.randomUUID(), at: Date.now(), by: { session: me.session, uid: me.uid, ...(me.device ? { device: me.device } : {}), name: me.name, rgb: me.rgb, glyph: me.glyph }, type, ...data };
     seen.add(ev.id);
     fs.appendFileSync(file, JSON.stringify(ev) + '\n');
     return ev;
@@ -161,7 +161,7 @@ export function createContextStore({ root, me, onEvent = () => {}, restore = () 
 
   const beat = () => {
     try {
-      fs.writeFileSync(beatFile, JSON.stringify({ session: me.session, uid: me.uid, name: me.name, rgb: me.rgb, glyph: me.glyph, avatar: me.avatar, about: me.about, title: me.title, status: me.status, at: Date.now() }));
+      fs.writeFileSync(beatFile, JSON.stringify({ session: me.session, uid: me.uid, ...(me.device ? { device: me.device } : {}), name: me.name, rgb: me.rgb, glyph: me.glyph, avatar: me.avatar, about: me.about, title: me.title, status: me.status, at: Date.now() }));
     } catch {
       // Presence is best effort.
     }

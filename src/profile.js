@@ -5,6 +5,7 @@ import crypto from 'node:crypto';
 import { HUMAN_RGB, COLOR_NAMES } from './theme.js';
 import { PORTRAITS, portraitById, findPortrait, defaultPortrait } from './portraits.js';
 import { makeIdentity } from './context.js';
+import { loadDevice } from './device.js';
 import { currentAccount, signInHelp, currentProvider, PROVIDER_IDS, shownProviders } from './auth.js';
 
 // Your selecle profile lives on your machine at ~/.selecle/profile.json.
@@ -175,6 +176,8 @@ export const identityOf = (profile, extra = {}) => {
   const portrait = portraitById(profile.avatar ?? defaultPortrait(profile.name).id);
   return makeIdentity(profile.name, {
     uid: profile.uid,
+    // This computer's id (src/device.js): the soul id is the person, the device is the machine.
+    device: loadDevice().id,
     avatar: portrait.id,
     glyph: portrait.glyph,
     rgb: HUMAN_RGB[profile.color] ?? HUMAN_RGB[0],

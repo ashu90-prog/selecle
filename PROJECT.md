@@ -301,6 +301,12 @@ sign-in, and starts the app, host, join, pair, sync and so on.
 - **The door:** room code (word + 3 digits, cryptographic random); 3 tries per connection; 8 wrong
   codes per minute across all connections lock the door for a minute. Public addresses are only
   opened when asked (`/invite public`).
+- **Device ids** (`device.js`, ADR-029): every computer has an ed25519 key pair in `~/.selecle/device.json`
+  (never shared, not part of the profile); its id is the key's fingerprint. A joining selecle proves
+  it by signing the host's random nonce. A proven guest's uid is `dev:<id>`, and the host's allow /
+  trust rules stick to the device, so a stranger using a trusted name gets nothing and a rename keeps
+  trust. A rule set by name for someone not inside yet goes to the first device that joins with it.
+  Plain Telnet clients have no device and are known by name.
 - **Friends' permissions** default to chat only. Summoning on the host's account needs `allow`;
   files, running things, the editor copy and own-AI spirits need `trust`; checked on every message,
   so taking trust back stops everything at once.
@@ -347,6 +353,7 @@ Full text in `Memory/Decisions.md`.
 | 026 | Kiro CLI is the primary agent; Claude Code and Antigravity are hidden |
 | 027 | Kiro-native spirits: specs first, agents with roles, the séance MCP server, steering |
 | 028 | The Kiro kit: people's own Kiro knows the room (`selecle init`) |
+| 029 | Each device has its own proven id; multiplayer rules stick to devices, not names |
 
 Later refinements recorded in the changelog: the restart button (ADR-022), the Crypt staying on
 the host in own-AI mode (ADR-025), `trust everyone`.

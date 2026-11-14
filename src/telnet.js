@@ -14,6 +14,7 @@ import { startSession, prepareProject } from './app.js';
 import { startAutoSync } from './sync.js';
 import { createCtlParser, createMirrorServer, encodeCtl } from './mirror.js';
 import { createRemoteHost, createRemoteClient } from './remote.js';
+import { shortDevice } from './device.js';
 import { readRequestHead, isWebSocketRequest, acceptWebSocket, landingPage, connectWs } from './ws.js';
 
 // Telnet (RFC 854) with the options a full-screen app needs:
@@ -172,7 +173,7 @@ export function cardFrom(client) {
 }
 
 // One connection: negotiate, ask name and room code, then run a session.
-function handleConnection(socket, { root, code, sessions, log, mayConjure, mayTouch, guard, ownAi = () => false }) {
+function handleConnection(socket, { root, code, sessions, log, mayConjure, mayTouch, bind = () => {}, guard, ownAi = () => false }) {
   let size = { ...DEFAULT_SIZE };
   let session = null;
   let who = null;   // the friend's identity once they are in
@@ -180,7 +181,7 @@ function handleConnection(socket, { root, code, sessions, log, mayConjure, mayTo
   // inside the same byte stream as invisible escape sequences; everything else is the screen.
   const mirror = createMirrorServer({
     root,
-    allowed: () => Boolean(who && mayTouch(who.name)),
+    allowed: () => Boolean(who && mayTouch(who)),
     onChange: (what) => log(`${who?.name ?? 'a friend'} ${what} (from their code editor)`),
   });
   const remote = createRemoteHost({ root, write: (text) => write(text), mirror, tell: (text) => session?.tell?.(text) });
@@ -261,10 +262,22 @@ function handleConnection(socket, { root, code, sessions, log, mayConjure, mayTo
       write(`  ${C.mist}That is not the word.${RESET}\r\n`);
     }
     if (socket.destroyed) return;
-    const me = makeIdentity(name, { canSummon: mayConjure(name), canAccess: mayTouch(name), viaHost: true, avatar: defaultPortrait(name).id, glyph: defaultPortrait(name).glyph, ...cardFrom(remote.client) });
+    // Who this is: a selecle client proves its device (src/device.js), and the device, not the
+    // name, is then who they are: their uid in the history, and what the host's rules stick to.
+    // A plain Telnet client has no device and is known by name, as before.
+    const device = await remote.deviceReady();
+    if (socket.destroyed) return;
+    bind(name, device);
+    const person = { name, device };
+    const me = makeIdentity(name, {
+      device,
+      ...(device ? { uid: `dev:${device}` } : {}),
+      canSummon: mayConjure(person), canAccess: mayTouch(person), viaHost: true,
+      avatar: defaultPortrait(name).id, glyph: defaultPortrait(name).glyph, ...cardFrom(remote.client),
+    });
     who = me;
     sessions.set(socket, { me });
-    log(`${name} joined`);
+    log(`${name} joined${device ? ` (device ${shortDevice(device)})` : ' (plain Telnet, known by name)'}`);
     session = startSession({
       root,
       me,
@@ -297,21 +310,38 @@ export function host({ root, port = DEFAULT_PORT, code = makeRoomCode(), log = c
   // With /invite diffai on, friends' spirits run on the friend's own AI account, so they cost
   // the host nothing. They then need the host's trust too, because what a spirit changes is
   // written into the host's project through the friend's synced copy.
-  const mayConjure = (name) => (rules.ownAi
-    ? (rules.named.get(name.toLowerCase()) ?? true) && mayTouch(name)
-    : rules.named.get(name.toLowerCase()) ?? (rules.dflt || trustAll));
+  //
+  // Rules stick to a device, not a name (src/device.js): a person is { name, device }, and their
+  // key is "dev:<id>" when their selecle proved its device, else "name:<name>" (plain Telnet).
+  // A rule set by name for someone not inside yet waits under the name and moves to the first
+  // device that joins with it, so a later stranger using the same name does not inherit it.
+  const nameKey = (name) => `name:${String(name).toLowerCase()}`;
+  const keyOf = (p) => (p?.device ? `dev:${p.device}` : nameKey(p?.name ?? ''));
+  const mayConjure = (p) => (rules.ownAi
+    ? (rules.named.get(keyOf(p)) ?? true) && mayTouch(p)
+    : rules.named.get(keyOf(p)) ?? (rules.dflt || trustAll));
   // Who may open, edit and run things on this computer: nobody until the host says so.
   const trusted = new Set();
   let trustAll = false;
-  const mayTouch = (name) => trustAll || trusted.has(name.toLowerCase());
+  const mayTouch = (p) => trustAll || trusted.has(keyOf(p));
+  const bind = (name, device) => {
+    if (!device) return;
+    const n = nameKey(name);
+    const d = `dev:${device}`;
+    if (rules.named.has(n)) { if (!rules.named.has(d)) rules.named.set(d, rules.named.get(n)); rules.named.delete(n); }
+    if (trusted.has(n)) { trusted.add(d); trusted.delete(n); }
+  };
   const refresh = () => {
-    for (const s of sessions.values()) if (s.me) { s.me.canSummon = mayConjure(s.me.name); s.me.canAccess = mayTouch(s.me.name); }
+    for (const s of sessions.values()) if (s.me) { s.me.canSummon = mayConjure(s.me); s.me.canAccess = mayTouch(s.me); }
   };
   const find = (name) => [...sessions.entries()].find(([, s]) => s.me?.name.toLowerCase() === name.toLowerCase());
+  // The key a host command means: the device of whoever is inside with that name, else the name.
+  const keyFor = (name) => { const hit = find(name); return hit ? keyOf(hit[1].me) : nameKey(name); };
+  const later = (name) => (find(name) ? '' : ` (nobody called ${name} is inside yet: it goes to the first device that joins with that name)`);
   const enter = (stream) => {
     visitors.add(stream);
     stream.on('close', () => visitors.delete(stream));
-    return handleConnection(stream, { root, code, sessions, log, mayConjure, mayTouch, guard, ownAi: () => rules.ownAi });
+    return handleConnection(stream, { root, code, sessions, log, mayConjure, mayTouch, bind, guard, ownAi: () => rules.ownAi });
   };
   // One port, two kinds of visitor. A web request (a WebSocket from `selecle join https://...`,
   // or a browser) starts with letters; a Telnet client starts with control bytes, or says nothing
@@ -357,7 +387,7 @@ export function host({ root, port = DEFAULT_PORT, code = makeRoomCode(), log = c
           const [verb = '', ...rest] = line.trim().split(/\s+/);
           const who = rest.join(' ');
           if (verb === 'who') {
-            const names = [...sessions.values()].map((s) => `${s.me.name}${mayConjure(s.me.name) ? '' : ' (no summoning)'}${mayTouch(s.me.name) ? ' (trusted with the files)' : ''}`);
+            const names = [...sessions.values()].filter((s) => s.me).map((s) => `${s.me.name}${mayConjure(s.me) ? '' : ' (no summoning)'}${mayTouch(s.me) ? ' (trusted with the files)' : ''}${s.me.device ? ` · device ${shortDevice(s.me.device)}` : ' · plain Telnet'}`);
             return names.length ? names.join(', ') : 'nobody is inside';
           }
           if (verb === 'diffai') {
@@ -373,9 +403,9 @@ export function host({ root, port = DEFAULT_PORT, code = makeRoomCode(), log = c
             return `guests ${rules.dflt ? 'may' : 'may not'} summon spirits now`;
           }
           if ((verb === 'allow' || verb === 'deny') && who) {
-            rules.named.set(who.toLowerCase(), verb === 'allow');
+            rules.named.set(keyFor(who), verb === 'allow');
             refresh();
-            return `${who} ${verb === 'allow' ? 'may' : 'may not'} summon spirits`;
+            return `${who} ${verb === 'allow' ? 'may' : 'may not'} summon spirits${later(who)}`;
           }
           // Everyone, now and later: files, running things, and summoning spirits.
           if ((verb === 'trust' || verb === 'untrust') && /^(everyone|all|\*)$/i.test(who)) {
@@ -389,10 +419,11 @@ export function host({ root, port = DEFAULT_PORT, code = makeRoomCode(), log = c
               : 'Nobody is trusted any more: no project files, no running things, no summoning (allow or trust people one by one again).';
           }
           if ((verb === 'trust' || verb === 'untrust') && who) {
-            if (verb === 'trust') trusted.add(who.toLowerCase()); else trusted.delete(who.toLowerCase());
+            if (verb === 'trust') trusted.add(keyFor(who));
+            else { trusted.delete(keyFor(who)); trusted.delete(nameKey(who)); }
             refresh();
             return verb === 'trust'
-              ? `${who} may now open, edit and run things in the project on this computer. /invite untrust ${who} takes it back.`
+              ? `${who} may now open, edit and run things in the project on this computer. /invite untrust ${who} takes it back.${later(who)}`
               : `${who} can no longer touch the project files`;
           }
           if (verb === 'kick' && who) {

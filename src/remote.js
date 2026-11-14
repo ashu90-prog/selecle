@@ -1,6 +1,7 @@
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { encodeCtl, createMirrorClient, workDir } from './mirror.js';
+import { verifyDevice, newNonce, loadDevice, makeDevice, publicPart, proveDevice } from './device.js';
 
 // What travels between the host and a friend's `selecle join`, beyond the screen itself:
 //   - their own copy of the project, kept in step (see mirror.js), for their code editor
@@ -22,6 +23,20 @@ export function createRemoteHost({ root, write, mirror, tell = () => {}, askTime
   const runs = new Map();      // id -> onEvent
   const id = () => crypto.randomBytes(6).toString('hex');
 
+  // The friend's device, proven: their selecle sends its device id and public key in its hello,
+  // we send a random nonce, it signs it (src/device.js). Only a signed, matching id counts.
+  let claim = null;            // { id, publicKey, nonce }
+  let device = null;           // the proven device id
+  let settle = null;           // resolves deviceReady
+  let heard = false;           // a hello arrived at all
+  const proven = new Promise((resolve) => { settle = resolve; });
+  const prove = (msg) => {
+    const d = msg?.device;
+    if (!d || typeof d.id !== 'string' || typeof d.publicKey !== 'string') return settle(null);
+    claim = { id: d.id, publicKey: d.publicKey, nonce: newNonce() };
+    write(encodeCtl('prove', { nonce: claim.nonce }));
+  };
+
   // A friend's own path becomes a path inside the host's project, or nothing.
   const inside = (target) => {
     if (typeof target !== 'string' || !target || target.includes('..') || path.isAbsolute(target)) return null;
@@ -30,9 +45,28 @@ export function createRemoteHost({ root, write, mirror, tell = () => {}, askTime
 
   return {
     get client() { return client; },
+    get device() { return device; },
+    // The proven device id (or null), once known. A selecle client says hello the moment it
+    // connects, and the stream is in order, so by the time the name and room code have been read a
+    // hello has either arrived or never will (a plain Telnet client): no hello, no wait. After a
+    // hello, wait for its proof (one round trip), at most `proofMs`.
+    deviceReady(proofMs = 3000) {
+      if (!heard || device || !claim) return Promise.resolve(device);
+      return Promise.race([proven, new Promise((r) => setTimeout(() => r(device), proofMs))]);
+    },
     onCtl(kind, msg) {
-      if (kind === 'hello') client = { provider: String(msg.provider ?? ''), version: Number(msg.version) || 1, profile: msg.profile && typeof msg.profile === 'object' ? msg.profile : null };
-      else if (MIRROR_KINDS.includes(kind)) for (const [k, o] of mirror.handle(kind, msg)) write(encodeCtl(k, o));
+      if (kind === 'hello') {
+        if (client) return;   // one hello per connection
+        heard = true;
+        client = { provider: String(msg.provider ?? ''), version: Number(msg.version) || 1, profile: msg.profile && typeof msg.profile === 'object' ? msg.profile : null };
+        prove(msg);
+      } else if (kind === 'proof') {
+        if (!claim || device) return;
+        const ok = verifyDevice({ id: claim.id, publicKey: claim.publicKey, nonce: claim.nonce, signature: msg?.signature });
+        device = ok ? claim.id : null;
+        claim = ok ? claim : null;
+        settle(device);
+      } else if (MIRROR_KINDS.includes(kind)) for (const [k, o] of mirror.handle(kind, msg)) write(encodeCtl(k, o));
       else if (kind === 'say') tell(String(msg.text ?? '').slice(0, 300));
       else if (kind === 'answer') {
         const a = asks.get(msg.id);
@@ -104,6 +138,10 @@ export function createRemoteClient({ send, say = () => {}, agents = {}, home = w
   let dir = null;
   let readyPromise = null;
   const runs = new Map();
+  // This computer's device (tests may hand one in as agents.device).
+  let dev = null;
+  // Under `node --test` each pretend friend is its own device.
+  const myDevice = () => (dev ??= agents.device ?? (process.env.NODE_TEST_CONTEXT && !process.env.SELECLE_HOME ? makeDevice() : loadDevice()));
 
   const ensureMirror = (project) => {
     if (readyPromise) return readyPromise;
@@ -130,7 +168,7 @@ export function createRemoteClient({ send, say = () => {}, agents = {}, home = w
       const provider = agents.provider ?? (await import('./auth.js')).currentProvider();
       const saved = agents.profile !== undefined ? agents.profile : (await import('./profile.js')).loadProfile();
       const profile = saved ? { avatar: saved.avatar, color: saved.color, title: saved.title, status: saved.status, about: saved.about, card: saved.card } : null;
-      send('hello', { version: 1, provider, profile });
+      send('hello', { version: 2, provider, profile, device: publicPart(myDevice()) });
     },
     stop() {
       mirror?.stop();
@@ -139,6 +177,8 @@ export function createRemoteClient({ send, say = () => {}, agents = {}, home = w
     },
     async receive(kind, msg) {
       if (CLIENT_MIRROR_KINDS.includes(kind)) return mirror?.receive(kind, msg);
+      // The host checks this device is really ours: sign its nonce with the device key.
+      if (kind === 'prove') return send('proof', { signature: proveDevice(myDevice(), String(msg?.nonce ?? '')) });
       if (kind === 'begin') {
         const where = await ensureMirror(msg.project);
         const opener = agents.openEditor ?? (await import('./editor.js')).openInEditor;
