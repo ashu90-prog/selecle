@@ -31,12 +31,23 @@ if (process.argv[2] === 'init') {
   const rest = process.argv.slice(3);
   const root = path.resolve(rest.find((a) => !a.startsWith('--')) ?? '.');
   const plan = installKit(root, { force: rest.includes('--force') });
+  // Then make it a git project, as launching selecle would, so the kit is in its first commit.
+  // A big or personal folder (home, a drive, 300+ items) is left alone unless --git says so.
+  const { repoKind, looksBig } = await import('../src/start.js');
+  const { ensureRepo, explainGitError } = await import('../src/git.js');
+  let repo;
+  if (repoKind(root) === 'root') repo = '  git                                already a git project';
+  else if (looksBig(root) && !rest.includes('--git')) repo = '  git                                not made a git project: this folder looks big or personal (home, a drive, 300+ items).\n                                     Run selecle there to choose, or selecle init --git to make it one anyway.';
+  else {
+    try { repo = `  git                                made a git project (${ensureRepo(root).join(', ')})`; } catch (e) { repo = `  git                                could not make it a git project: ${explainGitError(e, root)}`; }
+  }
   let agents = '';
   try { agents = `  ~/.kiro/agents/selecle-*.json       ${installAgents().written.length ? 'spirit agents written' : 'spirit agents already in place'}`; } catch (e) { agents = `  spirit agents: could not write (${e.message})`; }
   console.log([
     `The Kiro kit for ${root}:`,
     ...kitLines(plan),
     agents,
+    repo,
     '',
     'Open this project in Kiro (IDE or kiro-cli chat) and it knows the room: who is here, what the',
     'spirits are doing, who changed which file, and the specs. Commit .kiro/ so your friends get it too.',
@@ -61,7 +72,7 @@ usage:
   selecle tools                                          check and install the tools selecle works with (cloudflared, git, your editor...)
   selecle kiro [folder]                                  install the spirits as Kiro agents; show this project's Kiro steering and specs
   selecle mcp                                            the séance: selecle's MCP server for Kiro (spirits get it by themselves)
-  selecle init [folder] [--force]                        the Kiro kit: your own Kiro gets the séance, selecle steering and hooks
+  selecle init [folder] [--force] [--git]                make it a git project with the Kiro kit (your own Kiro gets the séance, steering, hooks)
   selecle room [--guard]                                 the room as text (what the Kiro kit's hooks run)
   selecle pair [folder]                                  print a pairing code for this project (once, for a new device)
   selecle pair <code> [folder] [--no-soul] [--force]     use a pairing code on this device

@@ -23,7 +23,7 @@ Tested with Kiro CLI 3.2.1.
 npm install -g selecle-cli
 kiro-cli login
 cd your-project
-selecle init        # the Kiro kit: your own Kiro gets the room (optional, recommended)
+selecle init        # a git project + the Kiro kit: your own Kiro gets the room (optional)
 selecle             # open the room
 ```
 
@@ -131,6 +131,8 @@ from the git worktree it starts in.
 | who is in the room | `SessionStart` | `selecle room` | Kiro starts the session knowing who is here and what the spirits are doing |
 | clash guard | `PreToolUse`, matcher `write` | `selecle room --guard` | if a spirit is working on that file, the write is **paused once** with a warning; Kiro tells you and asks. Trying again goes through |
 
+If the folder is not a git project yet, `selecle init` makes it one (`git init` and a first commit that includes the kit), just as opening selecle there would. Your home folder, a drive or a folder with 300+ items is left alone unless you pass `--git`.
+
 Commit `.kiro/` so your friends get it. Running `selecle init` again changes nothing; your own MCP
 servers are kept, and your own `selecle.md` or `selecle.json` are kept unless you pass `--force`.
 `selecle` must be on the PATH (`npm install -g selecle-cli`).
@@ -166,7 +168,7 @@ call. A one-time pause is the gentlest way to make sure Kiro (and you) hear abou
 
 | In a terminal | |
 |---|---|
-| `selecle init [folder] [--force]` | add the Kiro kit and install the spirit agents |
+| `selecle init [folder] [--force] [--git]` | add the Kiro kit, install the spirit agents, and make the folder a git project (a big or personal folder only with `--git`) |
 | `selecle kiro [folder]` | install the agents; show steering, specs and the kit |
 | `selecle mcp` | the séance MCP server (stdio) |
 | `selecle room [--guard]` | the room as text; what the kit's hooks run |

@@ -630,6 +630,28 @@ test('selecle init and selecle room --guard work as real commands', () => {
   assert.match(execFileSync(process.execPath, [SELECLE_BIN, 'room'], { cwd: root, encoding: 'utf8', env }), /Humans here: Ana/);
 });
 
+test('selecle init makes a plain folder a git project, with the kit in its first commit', () => {
+  const root = tmp();
+  put(root, 'app.js', 'export const x = 1;\n');
+  const env = { ...process.env, SELECLE_KIRO_AGENTS_DIR: tmp() };
+  const out = execFileSync(process.execPath, [SELECLE_BIN, 'init', root], { encoding: 'utf8', env });
+  assert.match(out, /git\s+made a git project \(init, first commit\)/);
+  const tracked = sh(root, 'ls-files').split('\n');
+  assert.ok(tracked.includes('app.js'));
+  assert.ok(tracked.includes('.kiro/settings/mcp.json'), 'the kit is in the first commit');
+  assert.match(execFileSync(process.execPath, [SELECLE_BIN, 'init', root], { encoding: 'utf8', env }), /git\s+already a git project/);
+});
+
+test('selecle init leaves a big folder\'s git alone unless --git says so', () => {
+  const root = tmp();
+  for (let i = 0; i < 305; i++) put(root, `f${i}.txt`, 'x');
+  const env = { ...process.env, SELECLE_KIRO_AGENTS_DIR: tmp() };
+  assert.match(execFileSync(process.execPath, [SELECLE_BIN, 'init', root], { encoding: 'utf8', env }), /not made a git project: this folder looks big/);
+  assert.ok(!fs.existsSync(path.join(root, '.git')));
+  assert.match(execFileSync(process.execPath, [SELECLE_BIN, 'init', root, '--git'], { encoding: 'utf8', env }), /made a git project/);
+  assert.ok(fs.existsSync(path.join(root, '.git')));
+});
+
 test('/init adds the kit from inside the app (host only); /steering raises a chronicler', () => {
   const root = tmp();
   const me = identityOf({ uid: 'u1', name: 'Ana', avatar: 'witch', color: 0 });

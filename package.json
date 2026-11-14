@@ -1,6 +1,6 @@
 {
   "name": "selecle-cli",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "A haunted multiplayer terminal workspace: AI spirits (Kiro CLI) edit your project on git branches while friends join over Telnet.",
   "license": "MIT",
   "repository": {

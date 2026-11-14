@@ -24,7 +24,7 @@ stitched into one zero-dependency Node app.
 ```
 npm install -g selecle-cli     # Node 18 or newer
 kiro-cli login                 # or: selecle login
-selecle init                   # optional: the Kiro kit, so your own Kiro knows the room
+selecle init                   # optional: makes it a git project + the Kiro kit for your own Kiro
 selecle                        # in any project folder
 ```
 
