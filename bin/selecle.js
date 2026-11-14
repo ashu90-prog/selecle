@@ -11,6 +11,40 @@ if (process.argv[2] === 'mcp') {
   process.exit(0);
 }
 
+// `selecle room [--guard]`: what the Kiro kit's hooks run (fast, no profile, always exit 0).
+if (process.argv[2] === 'room') {
+  const { roomCommand } = await import('../src/seance.js');
+  let code = 0;
+  try {
+    const r = await roomCommand({ args: process.argv.slice(3) });
+    if (r.out) console.log(r.out);
+    if (r.err) console.error(r.err);
+    code = r.code;
+  } catch { /* a hook must never break Kiro */ }
+  process.exit(code);
+}
+
+// `selecle init [folder] [--force]`: put the Kiro kit into a project (src/kiro/kit.js).
+if (process.argv[2] === 'init') {
+  const { installKit, kitLines } = await import('../src/kiro/kit.js');
+  const { installAgents } = await import('../src/kiro/agents.js');
+  const rest = process.argv.slice(3);
+  const root = path.resolve(rest.find((a) => !a.startsWith('--')) ?? '.');
+  const plan = installKit(root, { force: rest.includes('--force') });
+  let agents = '';
+  try { agents = `  ~/.kiro/agents/selecle-*.json       ${installAgents().written.length ? 'spirit agents written' : 'spirit agents already in place'}`; } catch (e) { agents = `  spirit agents: could not write (${e.message})`; }
+  console.log([
+    `The Kiro kit for ${root}:`,
+    ...kitLines(plan),
+    agents,
+    '',
+    'Open this project in Kiro (IDE or kiro-cli chat) and it knows the room: who is here, what the',
+    'spirits are doing, who changed which file, and the specs. Commit .kiro/ so your friends get it too.',
+    'Next: in selecle, /steering has a spirit write product.md, tech.md and structure.md from your code.',
+  ].join('\n'));
+  process.exit(plan.some((s) => s.state === 'broken') ? 1 : 0);
+}
+
 const USAGE = `selecle: a haunted terminal workspace where you and your friends build with AI spirits.
 
   Just type  selecle  to start. It checks you can use it, then opens the app with a short
@@ -27,6 +61,8 @@ usage:
   selecle tools                                          check and install the tools selecle works with (cloudflared, git, your editor...)
   selecle kiro [folder]                                  install the spirits as Kiro agents; show this project's Kiro steering and specs
   selecle mcp                                            the séance: selecle's MCP server for Kiro (spirits get it by themselves)
+  selecle init [folder] [--force]                        the Kiro kit: your own Kiro gets the séance, selecle steering and hooks
+  selecle room [--guard]                                 the room as text (what the Kiro kit's hooks run)
   selecle pair [folder]                                  print a pairing code for this project (once, for a new device)
   selecle pair <code> [folder] [--no-soul] [--force]     use a pairing code on this device
   selecle autosync on|off|status [folder]                the Crypt's memory follows you between devices by itself

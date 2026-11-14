@@ -17,6 +17,9 @@ import { createState, handleKey, keys, applyEvent } from '../src/app.js';
 import { identityOf } from '../src/profile.js';
 import { ensureRepo, createGitWorkspace } from '../src/git.js';
 import { flatten } from '../src/tree.js';
+import { Readable } from 'node:stream';
+import { kitPlan, installKit, kitInstalled, KIT_MCP, KIT_STEERING, KIT_HOOKS, SEANCE_SERVER, HOOKS, STEERING, STEERING_TASK } from '../src/kiro/kit.js';
+import { roomCommand, clashWarning, pathsOfToolCall } from '../src/seance.js';
 
 // The Kiro side of selecle: spirits as Kiro custom agents, the séance MCP server, Kiro specs
 // written by the Scribe and built task by task, and the project's steering.
@@ -334,7 +337,7 @@ test('/kiro shows the agents, the steering and the specs; /spec with nothing exp
   say('/spec');
   assert.match(state.messages.at(-1).text, /No Kiro specs yet/);
   say('/kiro');
-  assert.match(state.messages.at(-1).text, /selecle-scribe[\s\S]*No steering yet[\s\S]*kiro-cli mcp add --name selecle/);
+  assert.match(state.messages.at(-1).text, /selecle-scribe[\s\S]*No steering yet[\s\S]*Kiro kit: not in this project yet\. \/init/);
   put(root, '.kiro/steering/tech.md', 'x');
   const report = kiroReport(root, { install: false });
   assert.match(report, /Steering every spirit follows \(\.kiro\/steering\): tech\.md/);
@@ -531,4 +534,121 @@ test('selecle mcp runs the séance as a real process', () => {
   const lines = out.trim().split('\n').map((l) => JSON.parse(l));
   assert.equal(lines[0].result.serverInfo.name, 'selecle');
   assert.match(lines[1].result.content[0].text, /Shade for Ana: finished/);
+});
+
+// ---- the Kiro kit (selecle init): people's own Kiro knows the room ---------------------------
+
+const stdin = (obj) => Readable.from([typeof obj === 'string' ? obj : JSON.stringify(obj)]);
+
+test('the kit adds the séance, selecle steering and hooks in Kiro\'s formats', () => {
+  const root = tmp();
+  assert.deepEqual(kitPlan(root).map((s) => s.state), ['create', 'create', 'create']);
+  assert.equal(kitInstalled(root), false);
+  installKit(root);
+  const mcp = JSON.parse(fs.readFileSync(path.join(root, KIT_MCP), 'utf8'));
+  assert.deepEqual(mcp.mcpServers.selecle, SEANCE_SERVER);
+  assert.equal(mcp.mcpServers.selecle.command, 'selecle', 'portable: no machine paths in a file people commit');
+  assert.ok(!SEANCE_SERVER.autoApprove.includes('whisper'), 'a whisper reaches the humans, so Kiro asks first');
+  const steering = fs.readFileSync(path.join(root, KIT_STEERING), 'utf8');
+  assert.match(steering, /^---\ninclusion: always\n---\n/);
+  assert.match(steering, /\.graves[\s\S]*room[\s\S]*clash guard[\s\S]*\/spec/);
+  const hooks = JSON.parse(fs.readFileSync(path.join(root, KIT_HOOKS), 'utf8'));
+  assert.equal(hooks.version, 'v1');
+  assert.deepEqual(hooks.hooks.map((h) => [h.trigger, h.matcher ?? null, h.action.type, h.action.command]), [
+    ['SessionStart', null, 'command', 'selecle room'],
+    ['PreToolUse', 'write', 'command', 'selecle room --guard'],
+  ]);
+  assert.deepEqual(kitPlan(root).map((s) => s.state), ['ok', 'ok', 'ok'], 'a second run changes nothing');
+  assert.equal(kitInstalled(root), true);
+});
+
+test('the kit keeps the project\'s own MCP servers, steering and hooks', () => {
+  const root = tmp();
+  put(root, KIT_MCP, JSON.stringify({ mcpServers: { context7: { command: 'npx', args: ['-y', '@upstash/context7-mcp'] }, selecle: { command: 'old' } }, extra: true }));
+  put(root, KIT_STEERING, '# our own notes about selecle');
+  put(root, KIT_HOOKS, '{"version":"v1","hooks":[]}');
+  const plan = installKit(root);
+  assert.deepEqual(plan.map((s) => s.state), ['update', 'kept', 'kept']);
+  const mcp = JSON.parse(fs.readFileSync(path.join(root, KIT_MCP), 'utf8'));
+  assert.deepEqual(Object.keys(mcp.mcpServers), ['context7', 'selecle']);
+  assert.equal(mcp.extra, true);
+  assert.deepEqual(mcp.mcpServers.selecle, SEANCE_SERVER);
+  assert.equal(fs.readFileSync(path.join(root, KIT_STEERING), 'utf8'), '# our own notes about selecle');
+  assert.deepEqual(installKit(root, { force: true }).map((s) => s.state), ['ok', 'update', 'update']);
+  assert.equal(fs.readFileSync(path.join(root, KIT_STEERING), 'utf8'), STEERING);
+  // Windows line endings (git autocrlf) still count as the same file.
+  fs.writeFileSync(path.join(root, KIT_STEERING), STEERING.replace(/\n/g, '\r\n'));
+  assert.equal(kitPlan(root)[1].state, 'ok');
+});
+
+test('a broken mcp.json is reported and left alone', () => {
+  const root = tmp();
+  put(root, KIT_MCP, '{ not json');
+  assert.equal(installKit(root)[0].state, 'broken');
+  assert.equal(fs.readFileSync(path.join(root, KIT_MCP), 'utf8'), '{ not json');
+});
+
+test('selecle room: the room for Kiro\'s session start, or a plain note when no room was opened', async () => {
+  const r = await roomCommand({ cwd: room(), env: {} });
+  assert.equal(r.code, 0);
+  assert.match(r.out, /selecle room \(from the selecle hook\)[\s\S]*Humans here: Ana[\s\S]*Wisp the witch \(tester\)/);
+  assert.match((await roomCommand({ cwd: tmp(), env: {} })).out, /no selecle room has been opened here yet/);
+});
+
+test('the clash guard pauses Kiro\'s first write to a file a spirit is on, then lets it through', async () => {
+  const root = room();
+  const env = { SELECLE_PROJECT: root };
+  // As Kiro CLI 3.2.1 sends it: absolute path, lowercase drive letter on Windows.
+  const abs = path.join(root, 'test', 'app.test.js');
+  const call = { session_id: 'sess_1', hook_event_name: 'PreToolUse', tool_name: 'fs_append', tool_input: { path: abs.replace(/^[A-Z]:/, (d) => d.toLowerCase()), text: '// x' } };
+  const first = await roomCommand({ args: ['--guard'], input: stdin(call), cwd: root, env });
+  assert.equal(first.code, 2, 'blocked once: Kiro only shows a hook\'s message when it blocks');
+  assert.match(first.err, /Wisp the witch \(tester\), raised by Ana, is working on test\/app\.test\.js[\s\S]*paused once[\s\S]*goes through/);
+  assert.equal(first.out, '');
+  assert.deepEqual(await roomCommand({ args: ['--guard'], input: stdin(call), cwd: root, env }), { out: '', err: '', code: 0 }, 'the second try goes through');
+  assert.equal((await roomCommand({ args: ['--guard'], input: stdin({ ...call, session_id: 'sess_2' }), cwd: root, env })).code, 2, 'a new Kiro session is warned again');
+  assert.deepEqual(await roomCommand({ args: ['--guard'], input: stdin({ ...call, tool_input: { path: 'src/other.js' } }), cwd: root, env }), { out: '', err: '', code: 0 });
+  assert.deepEqual(await roomCommand({ args: ['--guard'], input: stdin('garbage'), cwd: root, env }), { out: '', err: '', code: 0 });
+  assert.deepEqual(pathsOfToolCall({ tool_input: { file_path: 'a', paths: ['b', 3] } }), ['a', 'b']);
+  assert.ok(clashWarning(root, ['TEST/APP.TEST.JS']).length > 0, 'paths compare without case');
+});
+
+test('selecle init and selecle room --guard work as real commands', () => {
+  const root = room();
+  const env = { ...process.env, SELECLE_KIRO_AGENTS_DIR: tmp() };
+  const out = execFileSync(process.execPath, [SELECLE_BIN, 'init', root], { encoding: 'utf8', env });
+  assert.match(out, /The Kiro kit for[\s\S]*\.kiro\/settings\/mcp\.json\s+added[\s\S]*\.kiro\/hooks\/selecle\.json\s+added[\s\S]*Commit \.kiro\//);
+  assert.ok(kitInstalled(root));
+  const call = JSON.stringify({ session_id: 'cli', tool_input: { path: 'test/app.test.js' } });
+  let code = 0;
+  let err = '';
+  try {
+    execFileSync(process.execPath, [SELECLE_BIN, 'room', '--guard'], { cwd: root, input: call, encoding: 'utf8', env, stdio: ['pipe', 'pipe', 'pipe'] });
+  } catch (e) { code = e.status; err = e.stderr; }
+  assert.equal(code, 2);
+  assert.match(err, /Wisp/);
+  assert.match(execFileSync(process.execPath, [SELECLE_BIN, 'room'], { cwd: root, encoding: 'utf8', env }), /Humans here: Ana/);
+});
+
+test('/init adds the kit from inside the app (host only); /steering raises a chronicler', () => {
+  const root = tmp();
+  const me = identityOf({ uid: 'u1', name: 'Ana', avatar: 'witch', color: 0 });
+  const state = createState(root, { me, oracle: mockOracle, engine: (o) => mockEngine({ ...o, stepMs: 5000 }) });
+  const say = (text) => { for (const k of keys(text)) handleKey(state, k); handleKey(state, '\r'); };
+  say('/init');
+  assert.match(state.messages.at(-1).text, /The Kiro kit for this project:[\s\S]*mcp\.json\s+added[\s\S]*paused once/);
+  assert.ok(kitInstalled(root));
+  say('/kiro');
+  assert.match(state.messages.at(-1).text, /Kiro kit: in this project/);
+  say('/steering');
+  const npc = state.roster.npcs.at(-1);
+  assert.equal(npc.role, 'chronicler');
+  assert.equal(npc.task, STEERING_TASK);
+  assert.match(STEERING_TASK, /product\.md[\s\S]*tech\.md[\s\S]*structure\.md[\s\S]*inclusion: always[\s\S]*selecle\.md/);
+  state.roster.banish('all');
+  const guest = createState(tmp(), { me: { ...me, viaHost: true }, oracle: mockOracle });
+  for (const k of keys('/init')) handleKey(guest, k);
+  handleKey(guest, '\r');
+  assert.match(guest.messages.at(-1).text, /Only the host/);
+  assert.ok(HOOKS.hooks.every((h) => h.timeout <= 15), 'hooks never hold Kiro up for long');
 });

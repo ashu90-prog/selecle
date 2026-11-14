@@ -16,6 +16,8 @@ export const COMMANDS = [
   { name: '/banish', args: '<name|all>', desc: 'send a spirit away' },
   { name: '/spec', args: '[feature | build <name>]', optional: true, desc: 'Kiro specs: the Scribe writes one, spirits build it task by task' },
   { name: '/kiro', desc: 'the Kiro side: spirit agents, steering, specs, the séance' },
+  { name: '/init', args: '[--force]', optional: true, desc: 'the Kiro kit: your own Kiro gets the séance, selecle steering and hooks' },
+  { name: '/steering', desc: 'a spirit writes product.md, tech.md and structure.md from your code' },
   { name: '/history', desc: 'show the latest commits' },
   { name: '/feed', alias: '/activity', desc: 'every spirit: who, how it ended, time, cost' },
   { name: '/replay', desc: 'time machine: scrub back through the session' },

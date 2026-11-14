@@ -15,7 +15,10 @@ inclusion: always
 - `src/kiro/specs.js`, `src/kiro/specrun.js`: Kiro specs; the Scribe writes one, spirits build its
   tasks in order.
 - `src/kiro/steering.js`: reads `.kiro/steering` for the Crypt and for spirits' worktrees.
-- `src/seance.js`: the séance, selecle's MCP server (`selecle mcp`): room, deeds, spec, whisper.
+- `src/seance.js`: the séance, selecle's MCP server (`selecle mcp`): room, deeds, spec, whisper; and
+  `selecle room [--guard]` for the kit's hooks.
+- `src/kiro/kit.js`: the Kiro kit `selecle init` puts in a project (mcp.json, steering, hooks).
+- `docs/kiro.md`: the user guide to everything Kiro in selecle.
 - `src/app.js`, `src/render.js`, `src/dialog.js`, `src/onboard.js`: TUI, settings, welcome page.
 - `src/git.js`, `src/context.js`, `src/sync.js`, `src/vault.js`: git-as-database, event log, sealed sync.
 - `src/telnet.js`, `src/ws.js`, `src/remote.js`, `src/mirror.js`, `src/tunnel.js`: multiplayer doors.

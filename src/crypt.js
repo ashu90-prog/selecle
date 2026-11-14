@@ -52,6 +52,7 @@ const SYSTEM = [
   'Small fixes and one-file changes are summoned directly, without a spec. If unsure, ask.',
   'When you set "spec" or "build", leave "summon" empty: the Scribe and the spec\'s task spirits are raised for you, one at a time. Summoning spirits for the same work would do it twice.',
   'Never make up spirit names: selecle names spirits when they rise. Say "a spirit" or "the Scribe".',
+  'If someone asks for steering docs (the project\'s rules for Kiro), summon a chronicler with the task: write the Kiro foundation steering (product.md, tech.md, structure.md) in .kiro/steering/ from the code. Or tell them /steering does it.',
   'The project\'s steering (below, if any) is the team\'s rules: plan work that follows it, and point out a request that breaks it.',
   'Summon as many spirits as the work needs or as the humans ask for, up to 10 at once; a queue runs them a few at a time.',
   'Split work so spirits never edit the same file at the same time; changes to one file belong to one spirit.',

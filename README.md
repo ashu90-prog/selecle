@@ -24,6 +24,7 @@ stitched into one zero-dependency Node app.
 ```
 npm install -g selecle-cli     # Node 18 or newer
 kiro-cli login                 # or: selecle login
+selecle init                   # optional: the Kiro kit, so your own Kiro knows the room
 selecle                        # in any project folder
 ```
 
@@ -52,10 +53,16 @@ selecle is a multiplayer front end for Kiro's way of working:
   project's specs and tasks) and `whisper` (ask the humans a question in the team chat). Add it
   to your own Kiro too: `kiro-cli mcp add --name selecle --command selecle --args mcp`.
 - **Your steering rules everything.** The Crypt plans with the project's `.kiro/steering/`, and
-  every spirit loads it, including steering you haven't committed yet.
+  every spirit loads it, including steering you haven't committed yet. `/steering` has a spirit
+  write `product.md`, `tech.md` and `structure.md` from your code.
+- **The Kiro kit: your own Kiro knows the room too.** `selecle init` (or `/init`) adds
+  `.kiro/settings/mcp.json` (the séance), `.kiro/steering/selecle.md` and two hooks: when a Kiro
+  session starts it learns who's here and what the spirits are doing, and if your Kiro is about to
+  write a file a spirit is working on, that write is **paused once** with a warning so you can
+  wait or go ahead. Commit `.kiro/` and everyone who opens the project in Kiro gets it.
 
 `/spec` lists the specs and their progress, `/kiro` (or `selecle kiro`) shows the agents,
-steering and specs. In `--mock` mode the whole spec flow is acted out for free: try
+steering, specs and kit. **Full guide: [docs/kiro.md](docs/kiro.md).** In `--mock` mode the whole spec flow is acted out for free: try
 `feature: a dark mode toggle`, then `build dark-mode-toggle`.
 
 ## Start

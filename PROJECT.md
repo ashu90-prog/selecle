@@ -133,6 +133,9 @@ Command line:
   scribe (specs only); the Crypt is `selecle-crypt` with no tools. Installed into `~/.kiro/agents/`.
 - **The séance** (`selecle mcp`): an MCP server every spirit gets: `room`, `deeds`, `spec`, `whisper`.
 - The project's **steering** guides the Crypt and every spirit. `/kiro` / `selecle kiro` show it all.
+- **The Kiro kit** (`selecle init`, `/init`, ADR-028): the project's own `.kiro/` gets the séance, `selecle.md`
+  steering and two hooks (room at session start; a write to a spirit's file paused once). `/steering`
+  writes the foundation steering. Full guide: `docs/kiro.md`.
 
 ### Talking and spirits
 - Type anything: talk to **the Crypt**. Replies come in **clean short paragraphs** and are written
@@ -343,6 +346,7 @@ Full text in `Memory/Decisions.md`.
 | 025 | Friends edit in their own editor on a synced copy, and may bring their own AI |
 | 026 | Kiro CLI is the primary agent; Claude Code and Antigravity are hidden |
 | 027 | Kiro-native spirits: specs first, agents with roles, the séance MCP server, steering |
+| 028 | The Kiro kit: people's own Kiro knows the room (`selecle init`) |
 
 Later refinements recorded in the changelog: the restart button (ADR-022), the Crypt staying on
 the host in own-AI mode (ADR-025), `trust everyone`.

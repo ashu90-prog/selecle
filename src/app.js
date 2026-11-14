@@ -13,6 +13,7 @@ import { buildPrompt, briefFor, pickOracle } from './crypt.js';
 import { createSpecRunner } from './kiro/specrun.js';
 import { listSpecs, specLine, specSlug } from './kiro/specs.js';
 import { kiroReport } from './kiro/report.js';
+import { installKit, kitLines, STEERING_TASK } from './kiro/kit.js';
 import { makeIdentity, createContextStore, lookalikes } from './context.js';
 import { editProfile, editPrefs, adoptSoul } from './profile.js';
 import { openDialog, openPicker, handleDialogKey, handleDialogMouse } from './dialog.js';
@@ -94,7 +95,7 @@ function note(state, text, extra = {}) {
 const HELP = 'Just talk to me and I will send spirits to do the work. '
   + 'Each spirit works on its own git branch and I merge its work when it is done. '
   + 'Ask for a bigger feature and I have the Scribe write a Kiro spec (requirements, design, tasks) in .kiro/specs/ first; once you approve it ("build it"), spirits build it one task at a time. Spirits are Kiro agents with roles: builders write code, testers only tests, chroniclers only docs, and all of them follow the project\'s .kiro/steering. '
-  + 'Shortcuts: /summon <task> raises a spirit directly (separate several with ;), /spec <feature> has the Scribe write a spec, /spec build <name> builds one, /spec lists them, /kiro shows the Kiro side, /banish <name|all> sends spirits away, '
+  + 'Shortcuts: /summon <task> raises a spirit directly (separate several with ;), /spec <feature> has the Scribe write a spec, /spec build <name> builds one, /spec lists them, /kiro shows the Kiro side, /init adds the Kiro kit so your own Kiro knows this room, /steering has a spirit write the project\'s steering,/banish <name|all> sends spirits away, '
   + '/history shows the latest commits, /settings (or /me) opens your ID card and settings, /feed shows every spirit and what it did, /replay is the time machine, /sync syncs the history between your devices right now (it also happens by itself), /invite opens the door so friends can join this crypt, /open <file> edits a project file (/open <folder path> opens that folder as the project, made a git project if it is not one) and /run <command> runs one (guests need /invite trust <name>), /code opens your editor, /folder opens the folder browser to switch the project (double-tap empty space in the file list opens the whole project in your code editor), /pair <join code> joins a friend whose /invite showed it; /pair alone shows a code to link another device of yours. Type / to browse commands and ready-made prompts, @ to pick a file. The coven column is for talking with your friends; I can read it too.';
 
 export function createState(root, {
@@ -409,6 +410,25 @@ function specCommand(state, arg) {
   return specWrite(state, name, named ? named[2] : arg);
 }
 
+// /init [--force]: the Kiro kit, so people's own Kiro knows this room (src/kiro/kit.js).
+// Guests may not write into the host's project this way.
+function kitCommand(state, arg) {
+  if (state.me.viaHost) return note(state, 'Only the host can add the Kiro kit to this project.', { failed: true });
+  let plan;
+  try {
+    plan = installKit(state.root, { force: /--force/.test(arg) });
+  } catch (e) {
+    return note(state, `Could not add the Kiro kit: ${e.message}`, { failed: true });
+  }
+  keepCursor(state, () => refresh(state.tree));
+  note(state, [
+    'The Kiro kit for this project:',
+    ...kitLines(plan),
+    '',
+    'Open the project in Kiro (IDE or kiro-cli chat) and it knows the room: who is here, what spirits are doing, who changed which file, the specs. A write to a file a spirit is on is paused once with a warning. Commit .kiro/ so friends get it too; /steering has a spirit write product.md, tech.md and structure.md.',
+  ].join('\n'), { failed: plan.some((s) => s.state === 'broken') });
+}
+
 function whisper(state, text) {
   say(state, { who: humanWho(state.me), text });
   publish(state, 'whisper', { from: 'human', text });
@@ -429,6 +449,10 @@ function runCommand(state, text) {
     specCommand(state, arg);
   } else if (cmd === '/kiro') {
     note(state, kiroReport(state.root, { install: false }));
+  } else if (cmd === '/init') {
+    kitCommand(state, arg);
+  } else if (cmd === '/steering') {
+    summon(state, [{ task: STEERING_TASK, role: 'chronicler' }]);
   } else if (cmd === '/help') {
     crypt(state, HELP);
   } else if (['/settings', '/me', '/name', '/avatar', '/color', '/about', '/title', '/status'].includes(cmd)) {

@@ -80,16 +80,38 @@ const oneLine = (t, n = 140) => {
 };
 const slash = (p) => String(p ?? '').replace(/\\/g, '/').replace(/^\.\//, '');
 
-function room({ root, spirit, now }) {
-  const people = presentIn(root, now);
-  const live = new Set(people.map((p) => p.session));
-  const events = readEvents(root);
-  // The latest state of each spirit, per terminal that owns it.
+// Spirits at work right now: the latest state of each spirit whose terminal is still open.
+export function spiritsAtWork(root, now = Date.now(), events = readEvents(root)) {
+  const live = new Set(presentIn(root, now).map((p) => p.session));
   const spirits = new Map();
   for (const ev of events) {
     if (ev.type === 'spirit' && ev.spirit?.name) spirits.set(`${ev.by?.session}:${ev.spirit.name}`, { ...ev.spirit, owner: ev.by?.name, session: ev.by?.session });
   }
-  const working = [...spirits.values()].filter((s) => live.has(s.session) && (s.status === 'working' || s.status === 'waiting'));
+  return [...spirits.values()].filter((s) => live.has(s.session) && (s.status === 'working' || s.status === 'waiting'));
+}
+
+// The clash guard (the kit's PreToolUse hook): Kiro is about to write `paths`; if a spirit is on
+// one of those files, a warning for Kiro's context, else ''. It never blocks.
+export function clashWarning(root, paths, now = Date.now()) {
+  const rel = (p) => {
+    const abs = path.resolve(root, String(p));
+    return slash(path.relative(root, abs)).toLowerCase();
+  };
+  const wanted = new Set(paths.filter((p) => typeof p === 'string' && p).map(rel));
+  const hits = spiritsAtWork(root, now).filter((s) => s.target && wanted.has(rel(s.target)));
+  return hits.map((s) => `selecle: ${s.name}${s.kind ? ` the ${s.kind}` : ''}${s.role && s.role !== 'builder' ? ` (${s.role})` : ''}, raised by ${s.owner ?? 'someone'}, is working on ${slash(s.target)} right now (task: ${oneLine(s.task, 100)}). Its work merges when it finishes, so keep this change small or leave the file to it; otherwise the merge may clash.`).join('\n');
+}
+
+// Paths a Kiro tool call is about to write, from a hook's stdin ({ tool_name, tool_input }).
+export function pathsOfToolCall(input) {
+  const t = input?.tool_input ?? {};
+  return [t.path, t.file_path, t.filePath, ...(Array.isArray(t.paths) ? t.paths : [])].filter((p) => typeof p === 'string');
+}
+
+function room({ root, spirit, now }) {
+  const people = presentIn(root, now);
+  const events = readEvents(root);
+  const working = spiritsAtWork(root, now, events);
   const chat = events.filter((e) => e.type === 'friend').slice(-8);
   const me = spirit?.name?.toLowerCase();
   return [
@@ -193,6 +215,57 @@ export function handleMessage(msg, ctx) {
     default:
       return isCall ? fail(-32601, `Method not found: ${msg.method}`) : null;
   }
+}
+
+const GUARD_FILE = 'guard.json';
+const GUARD_KEEP_MS = 12 * 60 * 60 * 1000;
+
+// The guard warns by blocking a write once. Checked against Kiro CLI 3.2.1: a PreToolUse hook's
+// stdout (exit 0) never reaches the model, while a non-zero exit blocks that one tool call and
+// hands stderr to the agent. So the first write to a file a spirit is on is stopped with the
+// warning; a second try at the same file in the same Kiro session goes through (it was warned).
+function warnedBefore(root, session, files, now) {
+  const file = path.join(root, CONTEXT_DIR, GUARD_FILE);
+  let seen = {};
+  try { seen = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { /* first warning */ }
+  for (const [k, v] of Object.entries(seen)) if (!v?.at || now - v.at > GUARD_KEEP_MS) delete seen[k];
+  const key = String(session || 'no-session');
+  const before = new Set(seen[key]?.files ?? []);
+  const fresh = files.filter((f) => !before.has(f));
+  seen[key] = { at: now, files: [...before, ...fresh] };
+  try { fs.writeFileSync(file, JSON.stringify(seen)); } catch { /* cannot remember: warn every time */ }
+  return fresh.length === 0;
+}
+
+// `selecle room [--guard]` for the kit's hooks. Returns { out, err, code }.
+// Plain: the room as text (SessionStart: stdout joins Kiro's context).
+// --guard: the hook's JSON on stdin; on a clash, the first time: code 2 with the warning on stderr
+// (the write is blocked and Kiro reads why); otherwise code 0 and nothing.
+export async function roomCommand({ args = [], input = process.stdin, cwd = process.cwd(), env = process.env, now = Date.now() } = {}) {
+  const root = projectRoot({ cwd, env });
+  if (!args.includes('--guard')) {
+    const out = fs.existsSync(path.join(root, CONTEXT_DIR))
+      ? `This project is a selecle room (from the selecle hook):\n${room({ root, spirit: null, now })}`
+      : 'This project has the selecle kit, but no selecle room has been opened here yet.';
+    return { out, err: '', code: 0 };
+  }
+  let text = '';
+  if (!input.isTTY) {
+    input.setEncoding?.('utf8');
+    for await (const chunk of input) text += chunk;
+  }
+  let call = null;
+  try { call = JSON.parse(text || 'null'); } catch { /* not a tool call */ }
+  const paths = pathsOfToolCall(call);
+  const warning = clashWarning(root, paths, now);
+  if (!warning) return { out: '', err: '', code: 0 };
+  const files = paths.map((p) => slash(path.relative(root, path.resolve(root, p))).toLowerCase());
+  if (warnedBefore(root, call?.session_id, files, now)) return { out: '', err: '', code: 0 };
+  return {
+    out: '',
+    err: `${warning}\nThis write was paused once so you know. Tell the user, or wait for the spirit; if you write this file again, it goes through.`,
+    code: 2,
+  };
 }
 
 // Serve on stdin/stdout until stdin closes. Nothing but protocol lines goes to stdout.

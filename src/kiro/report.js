@@ -1,6 +1,7 @@
 import { ROLES, ROLE_NAMES, agentName, agentsDir, ensureAgents, installAgents } from './agents.js';
 import { readSteering } from './steering.js';
 import { listSpecs, specLine } from './specs.js';
+import { kitPlan } from './kit.js';
 
 // What Kiro sees in a project, as plain lines: the spirit agents, the steering the spirits
 // follow, the specs and their progress, and how to add the séance to your own Kiro.
@@ -31,6 +32,14 @@ export function kiroReport(root, { install = true } = {}) {
     specs.length ? 'Specs (.kiro/specs):' : 'No specs yet. Ask the Crypt for a feature, or type /spec <feature>, and the Scribe writes one.',
     ...specs.map((s) => `  ${specLine(s)}`),
     '',
-    'Use the séance in your own Kiro too: kiro-cli mcp add --name selecle --command selecle --args mcp',
+    kitStatus(root),
   ].join('\n');
+}
+
+function kitStatus(root) {
+  const plan = kitPlan(root);
+  const has = (f) => plan.some((s) => s.file.replace(/\\/g, '/').endsWith(f) && (s.state === 'ok' || s.state === 'kept'));
+  if (plan.every((s) => s.state === 'ok')) return 'Kiro kit: in this project (séance, selecle steering, hooks). Your own Kiro knows the room.';
+  const parts = [has('mcp.json') && 'séance', has('selecle.md') && 'steering', has('selecle.json') && 'hooks'].filter(Boolean);
+  return `Kiro kit: ${parts.length ? `partly here (${parts.join(', ')})` : 'not in this project yet'}. /init (or selecle init) adds it, so your own Kiro knows the room.`;
 }
